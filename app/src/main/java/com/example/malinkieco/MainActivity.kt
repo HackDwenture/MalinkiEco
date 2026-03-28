@@ -633,6 +633,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateChatTabBadge(count: Int) {
+        val tab = tabLayout.getTabAt(1) ?: return
+        if (count > 0) {
+            val badge = tab.orCreateBadge
+            badge.isVisible = true
+            badge.backgroundColor = ContextCompat.getColor(this, android.R.color.holo_red_dark)
+            badge.number = count
+            badge.horizontalOffset = -12
+        } else {
+            tab.removeBadge()
+        }
+    }
+
     private fun updatePollsTabBadge(count: Int) {
         val tab = tabLayout.getTabAt(3) ?: return
         if (count > 0) {
@@ -1002,6 +1015,7 @@ class MainActivity : AppCompatActivity() {
         latestEvents = emptyList()
         latestPolls = emptyList()
         updateEventsTabBadge(0)
+        updateChatTabBadge(0)
         updatePollsTabBadge(0)
         chatAdapter.submitList(emptyList())
         eventAdapter.submitList(emptyList())
@@ -1199,9 +1213,13 @@ class MainActivity : AppCompatActivity() {
                     latestMessages.clear()
                     latestMessages.addAll(messages)
                     updateChatList(scrollToBottom = wasNearBottom || olderMessages.isEmpty())
-                    handleChatNotifications(user, messages)
+                    val mergedMessages = mergedChatMessages()
+                    handleChatNotifications(user, mergedMessages)
                     if (chatContainer.visibility == View.VISIBLE) {
                         markChatRead()
+                    } else {
+                        val unreadMessages = eventStateStore.unreadChatMessages(user.id, mergedMessages)
+                        updateChatTabBadge(unreadMessages.size)
                     }
                 }
             },
@@ -1223,9 +1241,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateChatList(scrollToBottom: Boolean = false) {
-        val merged = (olderMessages + latestMessages)
-            .distinctBy { it.id }
-            .sortedBy { it.createdAtClient }
+        val merged = mergedChatMessages()
 
         chatAdapter.submitList(merged) {
             rvChat.visibility = if (merged.isEmpty()) View.GONE else View.VISIBLE
@@ -1234,6 +1250,12 @@ class MainActivity : AppCompatActivity() {
                 rvChat.scrollToPosition(merged.lastIndex)
             }
         }
+    }
+
+    private fun mergedChatMessages(): List<ChatMessage> {
+        return (olderMessages + latestMessages)
+            .distinctBy { it.id }
+            .sortedBy { it.createdAtClient }
     }
 
     private fun renderPinnedMessage(message: ChatMessage?) {
@@ -2252,6 +2274,7 @@ class MainActivity : AppCompatActivity() {
                 maxOf(eventStateStore.getLastChatNotificationTimestamp(user.id), latestTimestamp)
             )
         }
+        updateChatTabBadge(0)
         lifecycleScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) { repository.markChatRead(user.id) }

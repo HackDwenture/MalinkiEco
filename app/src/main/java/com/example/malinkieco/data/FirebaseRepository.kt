@@ -6,6 +6,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -406,12 +407,12 @@ class FirebaseRepository(
         onError: (Exception) -> Unit
     ): ListenerRegistration {
         val query = if (currentUser.role == Role.ADMIN || currentUser.role == Role.MODERATOR) {
-            paymentRequests.orderBy("createdAtClient", Query.Direction.DESCENDING)
+            paymentRequests.orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(50)
         } else {
             paymentRequests
                 .whereEqualTo("userId", currentUser.id)
-                .orderBy("createdAtClient", Query.Direction.DESCENDING)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(50)
         }
 
@@ -430,7 +431,7 @@ class FirebaseRepository(
         onChange: (List<RegistrationRequest>) -> Unit,
         onError: (Exception) -> Unit
     ): ListenerRegistration {
-        return registrationRequests.orderBy("createdAtClient", Query.Direction.DESCENDING)
+        return registrationRequests.orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -870,7 +871,7 @@ class FirebaseRepository(
         onChange: (List<ChatMessage>) -> Unit,
         onError: (Exception) -> Unit
     ): ListenerRegistration {
-        return chat.orderBy("createdAtClient", Query.Direction.ASCENDING)
+        return chat.orderBy("createdAt", Query.Direction.ASCENDING)
             .limitToLast(pageSize)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -902,8 +903,8 @@ class FirebaseRepository(
     }
 
     suspend fun loadOlderMessages(oldestTimestamp: Long, pageSize: Long): ChatPage {
-        val snapshot = chat.orderBy("createdAtClient", Query.Direction.ASCENDING)
-            .endBefore(oldestTimestamp)
+        val snapshot = chat.orderBy("createdAt", Query.Direction.ASCENDING)
+            .endBefore(Timestamp(java.util.Date(oldestTimestamp)))
             .limitToLast(pageSize)
             .get()
             .await()
@@ -916,7 +917,7 @@ class FirebaseRepository(
     }
 
     suspend fun getRecentChatMessages(limit: Long): List<ChatMessage> {
-        val snapshot = chat.orderBy("createdAtClient", Query.Direction.DESCENDING)
+        val snapshot = chat.orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(limit)
             .get()
             .await()
@@ -928,7 +929,7 @@ class FirebaseRepository(
         onChange: (List<CommunityEvent>) -> Unit,
         onError: (Exception) -> Unit
     ): ListenerRegistration {
-        return events.orderBy("createdAtClient", Query.Direction.DESCENDING)
+        return events.orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(limit)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -943,7 +944,7 @@ class FirebaseRepository(
         onChange: (List<AuditLogEntry>) -> Unit,
         onError: (Exception) -> Unit
     ): ListenerRegistration {
-        return auditLogs.orderBy("createdAtClient", Query.Direction.DESCENDING)
+        return auditLogs.orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(100)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -955,7 +956,7 @@ class FirebaseRepository(
     }
 
     suspend fun getRecentEvents(limit: Long): List<CommunityEvent> {
-        val snapshot = events.orderBy("createdAtClient", Query.Direction.DESCENDING)
+        val snapshot = events.orderBy("createdAt", Query.Direction.DESCENDING)
             .limit(limit)
             .get()
             .await()
@@ -1081,7 +1082,7 @@ class FirebaseRepository(
         val actorName = getString("actorName") ?: return null
         val actorRole = getString("actorRole")?.let(Role::valueOf) ?: return null
         val title = getString("title") ?: return null
-        val createdAtClient = getLong("createdAtClient") ?: 0L
+        val createdAtClient = getServerBackedTime()
         return AuditLogEntry(
             id = id,
             actorId = actorId,
@@ -1100,7 +1101,7 @@ class FirebaseRepository(
         val senderId = getString("senderId") ?: return null
         val senderName = getString("senderName") ?: return null
         val text = getString("text").orEmpty()
-        val createdAtClient = getLong("createdAtClient") ?: 0L
+        val createdAtClient = getServerBackedTime()
         val mentionedUserIds = (get("mentionedUserIds") as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
         return ChatMessage(
             id = id,
@@ -1128,7 +1129,7 @@ class FirebaseRepository(
         val type = getString("type")?.let(EventType::valueOf) ?: return null
         val createdById = getString("createdById") ?: return null
         val createdByName = getString("createdByName") ?: return null
-        val createdAtClient = getLong("createdAtClient") ?: 0L
+        val createdAtClient = getServerBackedTime()
         val amount = getLong("amount")?.toInt() ?: 0
         val isClosed = getBoolean("isClosed") ?: false
         val pollOptions = (get("pollOptions") as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
@@ -1171,7 +1172,7 @@ class FirebaseRepository(
         val userName = getString("userName") ?: return null
         val amount = getLong("amount")?.toInt() ?: return null
         val status = getString("status")?.let(ManualPaymentStatus::valueOf) ?: return null
-        val createdAtClient = getLong("createdAtClient") ?: 0L
+        val createdAtClient = getServerBackedTime()
         return ManualPaymentRequest(
             id = id,
             userId = userId,
@@ -1203,10 +1204,16 @@ class FirebaseRepository(
             phone = phone,
             plots = plots,
             status = status,
-            createdAtClient = getLong("createdAtClient") ?: 0L,
+            createdAtClient = getServerBackedTime(),
             reviewedByName = getString("reviewedByName").orEmpty(),
             reviewReason = getString("reviewReason").orEmpty()
         )
+    }
+
+    private fun DocumentSnapshot.getServerBackedTime(): Long {
+        return getTimestamp("createdAt")?.toDate()?.time
+            ?: getLong("createdAtClient")
+            ?: 0L
     }
 
     private fun normalizeAuthEmail(loginOrEmail: String): String {
