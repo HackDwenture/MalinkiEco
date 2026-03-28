@@ -335,6 +335,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (currentUser != null && pushBackendClient.isConfigured()) {
+            lifecycleScope.launch {
+                runCatching { registerDeviceForPush() }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
         checkStartupRequirements()
     }
 
@@ -2901,9 +2910,16 @@ class MainActivity : AppCompatActivity() {
             val fcmToken = FirebaseMessaging.getInstance().token.awaitResult()
             runCatching {
                 pushBackendClient.registerDeviceToken(idToken, fcmToken)
-            }.onSuccess {
-                eventStateStore.setPushRegistrationConfirmed(userId, true)
-                return
+                pushBackendClient.getRegisteredDeviceCount(idToken)
+            }.onSuccess { registeredCount ->
+                val confirmed = registeredCount > 0
+                eventStateStore.setPushRegistrationConfirmed(userId, confirmed)
+                if (confirmed) {
+                    return
+                }
+                if (attempt < 2) {
+                    kotlinx.coroutines.delay(1200)
+                }
             }.onFailure {
                 eventStateStore.setPushRegistrationConfirmed(userId, false)
                 if (attempt < 2) {

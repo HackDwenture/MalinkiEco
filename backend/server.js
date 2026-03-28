@@ -72,6 +72,19 @@ app.post("/api/notifications/register-device", authenticateFirebaseUser, async (
   }
 });
 
+app.get("/api/notifications/devices", authenticateFirebaseUser, async (req, res) => {
+  try {
+    const snapshot = await userDevices.where("userId", "==", req.user.uid).get();
+    return res.json({
+      ok: true,
+      count: snapshot.size
+    });
+  } catch (error) {
+    console.error("[push] devices query failed", error);
+    return res.status(500).json({ error: error.message || "Internal error" });
+  }
+});
+
 app.post("/api/notifications/publish", authenticateFirebaseUser, async (req, res) => {
   try {
     const title = String(req.body?.title || "").trim();
@@ -359,6 +372,7 @@ async function authenticateFirebaseUser(req, res, next) {
     req.user = await admin.auth().verifyIdToken(token);
     return next();
   } catch (error) {
+    console.error("[auth] firebase verify failed", error);
     return res.status(401).json({ error: error.message || "Unauthorized" });
   }
 }

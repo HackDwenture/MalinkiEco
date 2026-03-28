@@ -25,6 +25,14 @@ class PushBackendClient {
         )
     }
 
+    fun getRegisteredDeviceCount(idToken: String): Int {
+        return request(
+            path = "/api/notifications/devices",
+            method = "GET",
+            idToken = idToken
+        ).optInt("count", 0)
+    }
+
     fun publishBroadcast(
         idToken: String,
         title: String,
