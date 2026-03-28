@@ -155,11 +155,11 @@ class FirebaseRepository(
         users.document(targetUser.id).update("role", role.name).await()
         createAuditLog(
             actor = actor,
-            title = if (role == Role.MODERATOR) "РќР°Р·РЅР°С‡РµРЅ РјРѕРґРµСЂР°С‚РѕСЂ" else "РЎРЅСЏС‚Р° СЂРѕР»СЊ РјРѕРґРµСЂР°С‚РѕСЂР°",
+            title = if (role == Role.MODERATOR) "Назначен модератор" else "Снята роль модератора",
             message = if (role == Role.MODERATOR) {
-                "РџРѕР»СЊР·РѕРІР°С‚РµР»СЋ РЅР°Р·РЅР°С‡РµРЅР° СЂРѕР»СЊ РјРѕРґРµСЂР°С‚РѕСЂР°."
+                "Пользователю назначена роль модератора."
             } else {
-                "РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРµСЂРµРІРµРґРµРЅ РІ РѕР±С‹С‡РЅС‹Рµ СѓС‡Р°СЃС‚РЅРёРєРё."
+                "Пользователь переведен в обычные участники."
             },
             targetUserId = targetUser.id,
             targetUserName = targetUser.fullName,
@@ -185,8 +185,8 @@ class FirebaseRepository(
         users.document(targetUser.id).update("balance", newBalance).await()
         createAuditLog(
             actor = actor,
-            title = "РР·РјРµРЅРµРЅ Р±Р°Р»Р°РЅСЃ СѓС‡Р°СЃС‚РЅРёРєР°",
-            message = "Р‘Р°Р»Р°РЅСЃ РёР·РјРµРЅРµРЅ СЃ ${targetUser.balance} в‚Ѕ РЅР° ${newBalance} в‚Ѕ.",
+            title = "Изменен баланс участника",
+            message = "Баланс изменен с ${targetUser.balance} ₽ на ${newBalance} ₽.",
             targetUserId = targetUser.id,
             targetUserName = targetUser.fullName,
             targetPlotName = targetUser.plotName
@@ -198,8 +198,8 @@ class FirebaseRepository(
         appSettings.document(COMMUNITY_FUNDS_DOCUMENT).set(mapOf("amount" to normalizedAmount)).await()
         createAuditLog(
             actor = actor,
-            title = "РР·РјРµРЅРµРЅР° РѕР±С‰Р°СЏ СЃСѓРјРјР° РїРѕСЃРµР»РєР°",
-            message = "РћР±С‰Р°СЏ СЃСѓРјРјР° РёР·РјРµРЅРµРЅР° СЃ ${previousAmount} в‚Ѕ РЅР° ${normalizedAmount} в‚Ѕ."
+            title = "Изменена общая сумма поселка",
+            message = "Общая сумма изменена с ${previousAmount} ₽ на ${normalizedAmount} ₽."
         )
     }
 
@@ -337,13 +337,13 @@ class FirebaseRepository(
         createTargetedEvent(
             creator = reviewer,
             userId = confirmedRequest.userId,
-            title = "РћРїР»Р°С‚Р° РїРѕРґС‚РІРµСЂР¶РґРµРЅР°",
+            title = "Оплата подтверждена",
             message = if (confirmedRequest.eventTitle.isNotBlank()) {
-                "Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${confirmedRequest.amount} в‚Ѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅ. РќР°Р·РЅР°С‡РµРЅРёРµ: ${confirmedRequest.eventTitle}."
+                "Ваш платеж на сумму ${confirmedRequest.amount} ₽ подтвержден. Назначение: ${confirmedRequest.eventTitle}."
             } else if (confirmedRequest.purpose.isNotBlank()) {
-                "Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${confirmedRequest.amount} в‚Ѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅ. РќР°Р·РЅР°С‡РµРЅРёРµ: ${confirmedRequest.purpose}."
+                "Ваш платеж на сумму ${confirmedRequest.amount} ₽ подтвержден. Назначение: ${confirmedRequest.purpose}."
             } else {
-                "Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${confirmedRequest.amount} в‚Ѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅ."
+                "Ваш платеж на сумму ${confirmedRequest.amount} ₽ подтвержден."
             }
         )
         createAuditLog(
@@ -378,20 +378,20 @@ class FirebaseRepository(
             createTargetedEvent(
                 creator = reviewer,
                 userId = request.userId,
-                title = "РћРїР»Р°С‚Р° РѕС‚РєР»РѕРЅРµРЅР°",
+                title = "Оплата отклонена",
                 message = if (reason.isBlank()) {
-                    "Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${request.amount} в‚Ѕ РѕС‚РєР»РѕРЅРµРЅ. РЈС‚РѕС‡РЅРёС‚Рµ РґРµС‚Р°Р»Рё Сѓ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РёР»Рё РјРѕРґРµСЂР°С‚РѕСЂР°."
+                    "Ваш платеж на сумму ${request.amount} ₽ отклонен. Уточните детали у администратора или модератора."
                 } else {
-                    "Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${request.amount} в‚Ѕ РѕС‚РєР»РѕРЅРµРЅ. РџСЂРёС‡РёРЅР°: ${reason.trim()}."
+                    "Ваш платеж на сумму ${request.amount} ₽ отклонен. Причина: ${reason.trim()}."
                 }
             )
             createAuditLog(
                 actor = reviewer,
-                title = "РћС‚РєР»РѕРЅРµРЅР° РѕРїР»Р°С‚Р°",
+                title = "Отклонена оплата",
                 message = if (reason.isBlank()) {
-                    "РћС‚РєР»РѕРЅРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${request.amount} в‚Ѕ."
+                    "Отклонена оплата на ${request.amount} ₽."
                 } else {
-                    "РћС‚РєР»РѕРЅРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${request.amount} в‚Ѕ. РџСЂРёС‡РёРЅР°: ${reason.trim()}."
+                    "Отклонена оплата на ${request.amount} ₽. Причина: ${reason.trim()}."
                 },
                 targetUserId = request.userId,
                 targetUserName = request.userName,
@@ -478,8 +478,8 @@ class FirebaseRepository(
         if (approvedRequest != null) {
             createAuditLog(
                 actor = reviewer,
-                title = "РћРґРѕР±СЂРµРЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЏ",
-                message = "Р—Р°СЏРІРєР° РЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЋ РѕРґРѕР±СЂРµРЅР°.",
+                title = "Одобрена регистрация",
+                message = "Заявка на регистрацию одобрена.",
                 targetUserId = approvedRequest.id,
                 targetUserName = approvedRequest.fullName,
                 targetPlotName = approvedRequest.plots.joinToString(", ")
@@ -501,11 +501,11 @@ class FirebaseRepository(
         if (request != null) {
             createAuditLog(
                 actor = reviewer,
-                title = "РћС‚РєР»РѕРЅРµРЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЏ",
+                title = "Отклонена регистрация",
                 message = if (reason.isBlank()) {
-                    "Р—Р°СЏРІРєР° РЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЋ РѕС‚РєР»РѕРЅРµРЅР°."
+                    "Заявка на регистрацию отклонена."
                 } else {
-                    "Р—Р°СЏРІРєР° РЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЋ РѕС‚РєР»РѕРЅРµРЅР°. РџСЂРёС‡РёРЅР°: ${reason.trim()}."
+                    "Заявка на регистрацию отклонена. Причина: ${reason.trim()}."
                 },
                 targetUserId = request.id,
                 targetUserName = request.fullName,
@@ -711,7 +711,7 @@ class FirebaseRepository(
             val fundsRef = appSettings.document(COMMUNITY_FUNDS_DOCUMENT)
             firestore.runTransaction { transaction ->
                 val currentFunds = transaction.get(fundsRef).getLong("amount")?.toInt() ?: 0
-                require(currentFunds >= cleanAmount) { "РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ СЃСЂРµРґСЃС‚РІ РІ РѕР±С‰РµР№ РєР°СЃСЃРµ" }
+                require(currentFunds >= cleanAmount) { "Недостаточно средств в общей кассе" }
                 transaction.set(fundsRef, mapOf("amount" to currentFunds - cleanAmount))
                 transaction.set(events.document(), eventData)
             }.await()
@@ -722,15 +722,15 @@ class FirebaseRepository(
             createAuditLog(
                 actor = creator,
                 title = when (type) {
-                    EventType.CHARGE -> "РЎРѕР·РґР°РЅ СЃР±РѕСЂ"
-                    EventType.EXPENSE -> "РЎРѕР·РґР°РЅР° РѕРїР»Р°С‚Р°"
-                    EventType.POLL -> "РЎРѕР·РґР°РЅ РѕРїСЂРѕСЃ"
-                    EventType.INFO -> "РЎРѕР·РґР°РЅРѕ РѕР±СЉСЏРІР»РµРЅРёРµ"
+                    EventType.CHARGE -> "Создан сбор"
+                    EventType.EXPENSE -> "Создана оплата"
+                    EventType.POLL -> "Создан опрос"
+                    EventType.INFO -> "Создано объявление"
                 },
                 message = buildString {
                     append(cleanTitle)
                     if (type == EventType.CHARGE || type == EventType.EXPENSE) {
-                        append(". РЎСѓРјРјР°: ${cleanAmount} в‚Ѕ.")
+                        append(". Сумма: ${cleanAmount} ₽.")
                     }
                 }.trim()
             )
@@ -828,7 +828,7 @@ class FirebaseRepository(
                     "message" to buildString {
                         append(snapshot.getString("message").orEmpty().trim())
                         if (isNotEmpty()) append("\n\n")
-                        append(if (type == EventType.POLL) "РћРїСЂРѕСЃ Р·Р°РІРµСЂС€РµРЅ." else "РЎР±РѕСЂ Р·Р°РІРµСЂС€РµРЅ.")
+                        append(if (type == EventType.POLL) "Опрос завершен." else "Сбор завершен.")
                     }
                 )
             )
@@ -838,7 +838,7 @@ class FirebaseRepository(
             val (type, title) = closedEvent
             createAuditLog(
                 actor = reviewer,
-                title = if (type == EventType.POLL) "Р—Р°РєСЂС‹С‚ РѕРїСЂРѕСЃ" else "Р—Р°РєСЂС‹С‚ СЃР±РѕСЂ",
+                title = if (type == EventType.POLL) "Закрыт опрос" else "Закрыт сбор",
                 message = title
             )
         }
