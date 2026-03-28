@@ -1,9 +1,10 @@
 package com.example.malinkieco.notifications
 
 import com.example.malinkieco.R
+import com.example.malinkieco.data.FirebaseRepository
 import com.example.malinkieco.data.PushBackendClient
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.messaging.FirebaseMessaging
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -40,15 +41,22 @@ class MalinkiMessagingService : FirebaseMessagingService() {
         store.setCachedFcmToken(token)
         val auth = FirebaseAuth.getInstance()
         val user = auth.currentUser ?: return
+        val repository = FirebaseRepository(
+            context = applicationContext,
+            auth = auth,
+            firestore = FirebaseFirestore.getInstance()
+        )
         val client = PushBackendClient()
-        if (!client.isConfigured()) return
 
         user.getIdToken(true)
             .addOnSuccessListener { result ->
                 val idToken = result.token ?: return@addOnSuccessListener
                 Thread {
                     runCatching {
-                        client.registerDeviceToken(idToken, token)
+                        repository.registerDeviceToken(user.uid, token)
+                        if (client.isConfigured()) {
+                            client.registerDeviceToken(idToken, token)
+                        }
                         store.setPushRegistrationConfirmed(user.uid, true)
                     }
                 }.start()

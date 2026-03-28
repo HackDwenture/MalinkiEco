@@ -12,6 +12,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
+import java.security.MessageDigest
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -29,6 +31,7 @@ class FirebaseRepository(
     private val chat = firestore.collection(CHAT_COLLECTION)
     private val events = firestore.collection(EVENTS_COLLECTION)
     private val auditLogs = firestore.collection(AUDIT_LOGS_COLLECTION)
+    private val userDevices = firestore.collection(USER_DEVICES_COLLECTION)
 
     fun currentAuthUser(): FirebaseUser? = auth.currentUser
 
@@ -49,6 +52,29 @@ class FirebaseRepository(
 
     suspend fun getFreshIdToken(): String? {
         return auth.currentUser?.getIdToken(true)?.await()?.token
+    }
+
+    suspend fun registerDeviceToken(userId: String, token: String) {
+        val cleanToken = token.trim()
+        if (userId.isBlank() || cleanToken.isBlank()) return
+        userDevices.document(deviceTokenDocumentId(userId, cleanToken))
+            .set(
+                mapOf(
+                    "userId" to userId,
+                    "token" to cleanToken,
+                    "platform" to "android",
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                    "updatedAtClient" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            )
+            .await()
+    }
+
+    suspend fun unregisterDeviceToken(userId: String, token: String) {
+        val cleanToken = token.trim()
+        if (userId.isBlank() || cleanToken.isBlank()) return
+        userDevices.document(deviceTokenDocumentId(userId, cleanToken)).delete().await()
     }
 
     suspend fun getAllUsers(): List<RemoteUser> {
@@ -1221,6 +1247,12 @@ class FirebaseRepository(
         return if (value.contains("@")) value else "$value@malinkieco.local"
     }
 
+    private fun deviceTokenDocumentId(userId: String, token: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val bytes = digest.digest("$userId:$token".toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
     private suspend fun <T> Task<T>.await(): T {
         return suspendCoroutine { continuation ->
             addOnSuccessListener { continuation.resume(it) }
@@ -1240,6 +1272,7 @@ class FirebaseRepository(
         private const val CHAT_COLLECTION = "chat_messages"
         private const val EVENTS_COLLECTION = "events"
         private const val AUDIT_LOGS_COLLECTION = "audit_logs"
+        private const val USER_DEVICES_COLLECTION = "user_devices"
     }
 }
 

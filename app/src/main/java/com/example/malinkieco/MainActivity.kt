@@ -1916,6 +1916,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doLogout() {
+        val loggedOutUser = currentUser
+        val cachedToken = eventStateStore.getCachedFcmToken()
+        if (loggedOutUser != null && cachedToken.isNotBlank()) {
+            lifecycleScope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        repository.unregisterDeviceToken(loggedOutUser.id, cachedToken)
+                    }
+                }
+            }
+        }
         usersListener?.remove()
         chatListener?.remove()
         eventsListener?.remove()
@@ -2917,6 +2928,9 @@ class MainActivity : AppCompatActivity() {
                 cachedToken
             } else {
                 FirebaseMessaging.getInstance().token.awaitResult().also { eventStateStore.setCachedFcmToken(it) }
+            }
+            runCatching {
+                repository.registerDeviceToken(userId, fcmToken)
             }
             runCatching {
                 pushBackendClient.registerDeviceToken(idToken, fcmToken)
