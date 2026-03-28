@@ -870,8 +870,8 @@ class FirebaseRepository(
             }
     }
 
-    fun observePinnedMessage(
-        onChange: (ChatMessage?) -> Unit,
+    fun observePinnedMessages(
+        onChange: (List<ChatMessage>) -> Unit,
         onError: (Exception) -> Unit
     ): ListenerRegistration {
         return chat.orderBy("pinnedAtClient", Query.Direction.DESCENDING)
@@ -881,7 +881,12 @@ class FirebaseRepository(
                     onError(error)
                     return@addSnapshotListener
                 }
-                onChange(snapshot?.documents?.mapNotNull { it.toChatMessage() }?.firstOrNull { it.isPinned })
+                onChange(
+                    snapshot?.documents
+                        ?.mapNotNull { it.toChatMessage() }
+                        ?.filter { it.isPinned }
+                        .orEmpty()
+                )
             }
     }
 

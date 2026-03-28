@@ -30,6 +30,7 @@ class PushBackendClient {
         title: String,
         body: String,
         destination: String,
+        category: String,
         excludedUserIds: List<String> = emptyList()
     ) {
         request(
@@ -41,6 +42,7 @@ class PushBackendClient {
                 .put("title", title)
                 .put("body", body)
                 .put("destination", destination)
+                .put("category", category)
                 .put("excludedUserIds", JSONArray(excludedUserIds))
                 .toString()
         )
@@ -51,7 +53,8 @@ class PushBackendClient {
         userIds: List<String>,
         title: String,
         body: String,
-        destination: String
+        destination: String,
+        category: String
     ) {
         if (userIds.isEmpty()) return
         request(
@@ -63,6 +66,7 @@ class PushBackendClient {
                 .put("title", title)
                 .put("body", body)
                 .put("destination", destination)
+                .put("category", category)
                 .put("targetUserIds", JSONArray(userIds.distinct()))
                 .toString()
         )

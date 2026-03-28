@@ -34,7 +34,7 @@ class EventReminderWorker(
             )
             val store = EventStateStore(applicationContext)
             val unreadEvents = store.unreadEvents(profile.id, repository.getRecentEventsForUser(profile, EVENT_CHECK_LIMIT))
-            if (unreadEvents.isNotEmpty()) {
+            if (unreadEvents.isNotEmpty() && store.isEventNotificationsEnabled(profile.id)) {
                 val newestTimestamp = unreadEvents.maxOf { it.createdAtClient }
                 if (newestTimestamp > store.getLastBackgroundNotificationTimestamp(profile.id)) {
                     val latestEvent = unreadEvents.maxBy { it.createdAtClient }

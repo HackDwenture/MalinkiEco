@@ -5,6 +5,10 @@ import com.example.malinkieco.data.CommunityEvent
 import com.example.malinkieco.data.ChatMessage
 
 class EventStateStore(context: Context) {
+    enum class ThemeMode {
+        SYSTEM, LIGHT, DARK
+    }
+
     private val preferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getLastSeenEventTimestamp(userId: String): Long {
@@ -63,6 +67,59 @@ class EventStateStore(context: Context) {
         preferences.edit().putBoolean(mentionNotificationsEnabledKey(userId), enabled).apply()
     }
 
+    fun isEventNotificationsEnabled(userId: String): Boolean {
+        return preferences.getBoolean(eventNotificationsEnabledKey(userId), true)
+    }
+
+    fun setEventNotificationsEnabled(userId: String, enabled: Boolean) {
+        preferences.edit().putBoolean(eventNotificationsEnabledKey(userId), enabled).apply()
+    }
+
+    fun isPollNotificationsEnabled(userId: String): Boolean {
+        return preferences.getBoolean(pollNotificationsEnabledKey(userId), true)
+    }
+
+    fun setPollNotificationsEnabled(userId: String, enabled: Boolean) {
+        preferences.edit().putBoolean(pollNotificationsEnabledKey(userId), enabled).apply()
+    }
+
+    fun isPaymentNotificationsEnabled(userId: String): Boolean {
+        return preferences.getBoolean(paymentNotificationsEnabledKey(userId), true)
+    }
+
+    fun setPaymentNotificationsEnabled(userId: String, enabled: Boolean) {
+        preferences.edit().putBoolean(paymentNotificationsEnabledKey(userId), enabled).apply()
+    }
+
+    fun isRegistrationNotificationsEnabled(userId: String): Boolean {
+        return preferences.getBoolean(registrationNotificationsEnabledKey(userId), true)
+    }
+
+    fun setRegistrationNotificationsEnabled(userId: String, enabled: Boolean) {
+        preferences.edit().putBoolean(registrationNotificationsEnabledKey(userId), enabled).apply()
+    }
+
+    fun getThemeMode(): ThemeMode {
+        val raw = preferences.getString(themeModeKey(), ThemeMode.SYSTEM.name).orEmpty()
+        return runCatching { ThemeMode.valueOf(raw) }.getOrDefault(ThemeMode.SYSTEM)
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        preferences.edit().putString(themeModeKey(), mode.name).apply()
+    }
+
+    fun shouldShowNotification(userId: String, category: String): Boolean {
+        return when (category) {
+            "chat" -> isChatNotificationsEnabled(userId)
+            "mention" -> isMentionNotificationsEnabled(userId)
+            "events" -> isEventNotificationsEnabled(userId)
+            "polls" -> isPollNotificationsEnabled(userId)
+            "payments" -> isPaymentNotificationsEnabled(userId)
+            "registration" -> isRegistrationNotificationsEnabled(userId)
+            else -> true
+        }
+    }
+
     fun clear(userId: String) {
         preferences.edit()
             .remove(lastSeenEventKey(userId))
@@ -72,6 +129,10 @@ class EventStateStore(context: Context) {
             .remove(lastChatNotificationKey(userId))
             .remove(chatNotificationsEnabledKey(userId))
             .remove(mentionNotificationsEnabledKey(userId))
+            .remove(eventNotificationsEnabledKey(userId))
+            .remove(pollNotificationsEnabledKey(userId))
+            .remove(paymentNotificationsEnabledKey(userId))
+            .remove(registrationNotificationsEnabledKey(userId))
             .apply()
     }
 
@@ -103,6 +164,16 @@ class EventStateStore(context: Context) {
     private fun chatNotificationsEnabledKey(userId: String): String = "chat_notifications_enabled_$userId"
 
     private fun mentionNotificationsEnabledKey(userId: String): String = "mention_notifications_enabled_$userId"
+
+    private fun eventNotificationsEnabledKey(userId: String): String = "event_notifications_enabled_$userId"
+
+    private fun pollNotificationsEnabledKey(userId: String): String = "poll_notifications_enabled_$userId"
+
+    private fun paymentNotificationsEnabledKey(userId: String): String = "payment_notifications_enabled_$userId"
+
+    private fun registrationNotificationsEnabledKey(userId: String): String = "registration_notifications_enabled_$userId"
+
+    private fun themeModeKey(): String = "theme_mode"
 
     companion object {
         private const val PREFS_NAME = "event_state_store"

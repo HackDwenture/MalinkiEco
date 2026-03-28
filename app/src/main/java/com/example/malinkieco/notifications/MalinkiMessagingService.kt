@@ -21,6 +21,14 @@ class MalinkiMessagingService : FirebaseMessagingService() {
             ?: message.data["body"]
             ?: getString(R.string.push_default_body)
         val destination = message.data["destination"].orEmpty()
+        val category = message.data["category"].orEmpty().ifBlank { destination }
+        val userId = FirebaseAuth.getInstance().currentUser?.uid
+        if (userId != null) {
+            val store = EventStateStore(applicationContext)
+            if (!store.shouldShowNotification(userId, category)) {
+                return
+            }
+        }
 
         EventNotificationHelper.showEventNotification(this, title, body, destination = destination)
     }

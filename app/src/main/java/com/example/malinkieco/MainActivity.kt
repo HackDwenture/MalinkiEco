@@ -12,11 +12,14 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.RadioButton
 import android.widget.Toast
@@ -24,6 +27,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.view.ViewCompat
@@ -90,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var communityFundsCard: View
     private lateinit var pollsContainer: View
     private lateinit var pollCreateControls: View
+    private lateinit var pollCreatePanel: View
     private lateinit var residentsContainer: View
     private lateinit var logsContainer: View
     private lateinit var chatContainer: LinearLayout
@@ -99,6 +104,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etLoginPassword: EditText
     private lateinit var btnLogin: Button
     private lateinit var btnOpenRegistration: Button
+    private lateinit var btnOpenSettings: View
     private lateinit var tvHeaderTitle: TextView
     private lateinit var tvHeaderSubtitle: TextView
     private lateinit var summaryCard: MaterialCardView
@@ -133,6 +139,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etNewPassword: EditText
     private lateinit var btnAddUser: Button
     private lateinit var eventControls: View
+    private lateinit var eventControlsPanel: View
     private lateinit var etEventTitle: EditText
     private lateinit var etEventMessage: EditText
     private lateinit var etEventAmount: EditText
@@ -143,6 +150,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rbEventCharge: RadioButton
     private lateinit var rbEventExpense: RadioButton
     private lateinit var rbEventPoll: RadioButton
+    private lateinit var btnToggleEventControls: Button
     private lateinit var btnCreateEvent: Button
     private lateinit var userPayControls: View
     private lateinit var etPayAmount: EditText
@@ -170,24 +178,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etChatMessage: EditText
     private lateinit var chatComposerInputLayout: TextInputLayout
     private lateinit var btnSendMessage: Button
-    private lateinit var btnMentionUser: Button
     private lateinit var btnAttachPlaceholder: Button
     private lateinit var pinnedMessageCard: MaterialCardView
+    private lateinit var tvPinnedMessageCounter: TextView
     private lateinit var tvPinnedMessageTitle: TextView
     private lateinit var tvPinnedMessageBody: TextView
     private lateinit var chatReplyPreviewContainer: View
     private lateinit var tvReplyingToTitle: TextView
     private lateinit var tvReplyingToBody: TextView
     private lateinit var btnCancelReply: Button
-    private lateinit var chatNotificationsCard: MaterialCardView
-    private lateinit var switchChatNotifications: MaterialSwitch
-    private lateinit var switchMentionNotifications: MaterialSwitch
     private lateinit var tvEventsEmpty: TextView
     private lateinit var tvPollsEmpty: TextView
     private lateinit var tvLogsEmpty: TextView
     private lateinit var etPollTitle: EditText
     private lateinit var etPollMessage: EditText
     private lateinit var etPollCreateOptions: EditText
+    private lateinit var btnTogglePollCreateControls: Button
     private lateinit var btnCreatePoll: Button
     private lateinit var tvResidentsEmpty: TextView
     private lateinit var tvChatEmpty: TextView
@@ -228,6 +234,8 @@ class MainActivity : AppCompatActivity() {
     private var communityFundsListener: ListenerRegistration? = null
     private var pinnedMessageListener: ListenerRegistration? = null
     private var isAdminPanelExpanded = false
+    private var isEventControlsExpanded = false
+    private var isPollCreateExpanded = false
     private var isPaymentRequestsExpanded = false
     private var isRegistrationRequestsExpanded = false
     private var pendingPaymentRequestsCount = 0
@@ -236,9 +244,11 @@ class MainActivity : AppCompatActivity() {
 
     private val latestMessages = mutableListOf<ChatMessage>()
     private val olderMessages = mutableListOf<ChatMessage>()
-    private var pinnedMessage: ChatMessage? = null
+    private var pinnedMessages = emptyList<ChatMessage>()
+    private var currentPinnedMessageIndex = 0
     private var replyingToMessage: ChatMessage? = null
     private val selectedMentionedUsers = linkedSetOf<RemoteUser>()
+    private var everyoneMentionActive = false
     private var isLoadingOlderMessages = false
     private var hasMoreOlderMessages = true
     private var lastSeenEventTimestamp = 0L
@@ -250,12 +260,45 @@ class MainActivity : AppCompatActivity() {
     private var gateTertiaryAction: (() -> Unit)? = null
     private var hasInitializedChatNotifications = false
     private var pendingNotificationDestination: String? = null
+    private var suppressMentionPicker = false
+
+    private val chatMentionWatcher = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+        override fun afterTextChanged(editable: Editable?) {
+            if (suppressMentionPicker) return
+            val text = editable?.toString().orEmpty()
+            if (text.isEmpty()) {
+                selectedMentionedUsers.clear()
+                everyoneMentionActive = false
+                return
+            }
+            everyoneMentionActive = text.contains("@${getString(R.string.chat_mentions_everyone)}")
+            if (!text.endsWith("@")) return
+            etChatMessage.removeTextChangedListener(this)
+            try {
+                showModernMentionPicker()
+            } finally {
+                etChatMessage.addTextChangedListener(this)
+            }
+        }
+    }
 
     private val notificationsPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val initialStateStore = EventStateStore(applicationContext)
+        AppCompatDelegate.setDefaultNightMode(
+            when (initialStateStore.getThemeMode()) {
+                EventStateStore.ThemeMode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+                EventStateStore.ThemeMode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
+                EventStateStore.ThemeMode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+        )
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
@@ -314,6 +357,7 @@ class MainActivity : AppCompatActivity() {
         communityFundsCard = findViewById(R.id.communityFundsCard)
         pollsContainer = findViewById(R.id.pollsScrollContainer)
         pollCreateControls = findViewById(R.id.pollCreateControls)
+        pollCreatePanel = findViewById(R.id.pollCreatePanel)
         residentsContainer = findViewById(R.id.residentsScrollContainer)
         logsContainer = findViewById(R.id.logsScrollContainer)
         chatContainer = findViewById(R.id.chatContainer)
@@ -323,6 +367,7 @@ class MainActivity : AppCompatActivity() {
         etLoginPassword = findViewById(R.id.etLoginPassword)
         btnLogin = findViewById(R.id.btnLogin)
         btnOpenRegistration = findViewById(R.id.btnOpenRegistration)
+        btnOpenSettings = findViewById(R.id.btnOpenSettings)
         tvHeaderTitle = findViewById(R.id.tvHeaderTitle)
         tvHeaderSubtitle = findViewById(R.id.tvHeaderSubtitle)
         summaryCard = findViewById(R.id.summaryCard)
@@ -357,6 +402,7 @@ class MainActivity : AppCompatActivity() {
         etNewPassword = findViewById(R.id.etNewPassword)
         btnAddUser = findViewById(R.id.btnAddUser)
         eventControls = findViewById(R.id.eventControls)
+        eventControlsPanel = findViewById(R.id.eventControlsPanel)
         etEventTitle = findViewById(R.id.etEventTitle)
         etEventMessage = findViewById(R.id.etEventMessage)
         etEventAmount = findViewById(R.id.etEventAmount)
@@ -367,6 +413,7 @@ class MainActivity : AppCompatActivity() {
         rbEventCharge = findViewById(R.id.rbEventCharge)
         rbEventExpense = findViewById(R.id.rbEventExpense)
         rbEventPoll = findViewById(R.id.rbEventPoll)
+        btnToggleEventControls = findViewById(R.id.btnToggleEventControls)
         btnCreateEvent = findViewById(R.id.btnCreateEvent)
         userPayControls = findViewById(R.id.userPayControls)
         etPayAmount = findViewById(R.id.etPayAmount)
@@ -387,6 +434,7 @@ class MainActivity : AppCompatActivity() {
         etPollTitle = findViewById(R.id.etPollTitle)
         etPollMessage = findViewById(R.id.etPollMessage)
         etPollCreateOptions = findViewById(R.id.etPollCreateOptions)
+        btnTogglePollCreateControls = findViewById(R.id.btnTogglePollCreateControls)
         btnCreatePoll = findViewById(R.id.btnCreatePoll)
         rvUsers = findViewById(R.id.rvUsers)
         rvLogs = findViewById(R.id.rvLogs)
@@ -395,17 +443,14 @@ class MainActivity : AppCompatActivity() {
         rvRegistrationRequests = findViewById(R.id.rvRegistrationRequests)
         tabLayout = findViewById(R.id.tabLayout)
         pinnedMessageCard = findViewById(R.id.pinnedMessageCard)
+        tvPinnedMessageCounter = findViewById(R.id.tvPinnedMessageCounter)
         tvPinnedMessageTitle = findViewById(R.id.tvPinnedMessageTitle)
         tvPinnedMessageBody = findViewById(R.id.tvPinnedMessageBody)
-        chatNotificationsCard = findViewById(R.id.chatNotificationsCard)
-        switchChatNotifications = findViewById(R.id.switchChatNotifications)
-        switchMentionNotifications = findViewById(R.id.switchMentionNotifications)
         chatReplyPreviewContainer = findViewById(R.id.chatReplyPreviewContainer)
         tvReplyingToTitle = findViewById(R.id.tvReplyingToTitle)
         tvReplyingToBody = findViewById(R.id.tvReplyingToBody)
         btnCancelReply = findViewById(R.id.btnCancelReply)
         btnAttachPlaceholder = findViewById(R.id.btnAttachPlaceholder)
-        btnMentionUser = findViewById(R.id.btnMentionUser)
         chatComposerInputLayout = findViewById(R.id.chatComposerInputLayout)
         etChatMessage = findViewById(R.id.etChatMessage)
         btnSendMessage = findViewById(R.id.btnSendMessage)
@@ -477,6 +522,7 @@ class MainActivity : AppCompatActivity() {
             currentUserIdProvider = { currentUser?.id },
             readerCutoffProvider = { allUsers.filter { it.id != currentUser?.id }.maxOfOrNull { it.lastChatReadAt } ?: 0L },
             onReplyMessage = { message -> startReplyToMessage(message) },
+            onOpenReplyTarget = { message -> openReplyTarget(message.replyToMessageId) },
             onTogglePinMessage = { message -> togglePinMessage(message) },
             onEditMessage = { message -> promptEditMessage(message) },
             onDeleteMessage = { message -> confirmDeleteMessage(message) }
@@ -573,15 +619,17 @@ class MainActivity : AppCompatActivity() {
     private fun setupListeners() {
         btnLogin.setOnClickListener { doLogin() }
         btnOpenRegistration.setOnClickListener { showRegistrationFormDialog() }
+        btnOpenSettings.setOnClickListener { showSettingsDialog() }
         btnLogout.setOnClickListener { doLogout() }
         btnAddUser.setOnClickListener { addUser() }
         btnCreateEvent.setOnClickListener { createEvent() }
         btnCreatePoll.setOnClickListener { createPoll() }
+        btnToggleEventControls.setOnClickListener { toggleEventControlsPanel() }
+        btnTogglePollCreateControls.setOnClickListener { togglePollCreatePanel() }
         btnPay.setOnClickListener { createManualPaymentRequest() }
         btnSelectChargeEvent.setOnClickListener { chooseChargeEvent() }
         btnSendMessage.setOnClickListener { sendMessage() }
         btnAttachPlaceholder.setOnClickListener { toast(getString(R.string.chat_attachment_unavailable)) }
-        btnMentionUser.setOnClickListener { showMentionPicker() }
         btnCancelReply.setOnClickListener { clearReplyTarget() }
         btnToggleAdminPanel.setOnClickListener { toggleAdminPanel() }
         btnTogglePaymentRequests.setOnClickListener { togglePaymentRequestsPanel() }
@@ -618,12 +666,7 @@ class MainActivity : AppCompatActivity() {
                 updateEventForm()
             }
         }
-        switchChatNotifications.setOnCheckedChangeListener { _, isChecked ->
-            currentUser?.id?.let { eventStateStore.setChatNotificationsEnabled(it, isChecked) }
-        }
-        switchMentionNotifications.setOnCheckedChangeListener { _, isChecked ->
-            currentUser?.id?.let { eventStateStore.setMentionNotificationsEnabled(it, isChecked) }
-        }
+        etChatMessage.addTextChangedListener(chatMentionWatcher)
         updateEventForm()
         setupEventTemplates()
     }
@@ -824,6 +867,7 @@ class MainActivity : AppCompatActivity() {
         EventReminderScheduler.schedule(applicationContext)
         loginContainer.visibility = View.GONE
         dashboardContainer.visibility = View.VISIBLE
+        btnOpenSettings.visibility = View.VISIBLE
 
         val isAdmin = user.role == Role.ADMIN
         val isModerator = user.role == Role.MODERATOR
@@ -844,6 +888,8 @@ class MainActivity : AppCompatActivity() {
         adminControls.visibility = View.GONE
         eventControls.visibility = if (canCreateEvents) View.VISIBLE else View.GONE
         pollCreateControls.visibility = if (canCreatePolls) View.VISIBLE else View.GONE
+        eventControlsPanel.visibility = View.GONE
+        pollCreatePanel.visibility = View.GONE
         userPayControls.visibility = if (user.role == Role.USER || user.role == Role.MODERATOR) View.VISIBLE else View.GONE
         selectedChargeEvents = emptyList()
         updateSelectedChargeEventsUi()
@@ -856,9 +902,13 @@ class MainActivity : AppCompatActivity() {
         adminFormContainer.visibility = View.GONE
         unreadEventsBanner.visibility = View.GONE
         isAdminPanelExpanded = false
+        isEventControlsExpanded = false
+        isPollCreateExpanded = false
         isPaymentRequestsExpanded = false
         isRegistrationRequestsExpanded = false
         btnToggleAdminPanel.text = getString(R.string.admin_tools_open)
+        btnToggleEventControls.text = getString(R.string.panel_expand)
+        btnTogglePollCreateControls.text = getString(R.string.panel_expand)
         btnTogglePaymentRequests.text = getString(R.string.panel_expand)
         btnToggleRegistrationRequests.text = getString(R.string.panel_expand)
         bindCommunityFunds(0)
@@ -869,8 +919,6 @@ class MainActivity : AppCompatActivity() {
         pendingRegistrationRequestsCount = 0
         updateResidentsTabBadge()
         updateEventsTabBadge(0)
-        switchChatNotifications.isChecked = eventStateStore.isChatNotificationsEnabled(user.id)
-        switchMentionNotifications.isChecked = eventStateStore.isMentionNotificationsEnabled(user.id)
         renderPinnedMessage(null)
         clearReplyTarget()
         tabLayout.getTabAt(0)?.select()
@@ -906,9 +954,11 @@ class MainActivity : AppCompatActivity() {
     private fun resetUiState() {
         latestMessages.clear()
         olderMessages.clear()
-        pinnedMessage = null
+        pinnedMessages = emptyList()
+        currentPinnedMessageIndex = 0
         replyingToMessage = null
         selectedMentionedUsers.clear()
+        everyoneMentionActive = false
         hasInitializedChatNotifications = false
         hasMoreOlderMessages = true
         isLoadingOlderMessages = false
@@ -1123,11 +1173,12 @@ class MainActivity : AppCompatActivity() {
             onError = { runOnUiThread { toast(getString(R.string.chat_load_failed)) } }
         )
 
-        pinnedMessageListener = repository.observePinnedMessage(
-            onChange = { message ->
+        pinnedMessageListener = repository.observePinnedMessages(
+            onChange = { messages ->
                 runOnUiThread {
-                    pinnedMessage = message
-                    renderPinnedMessage(message)
+                    pinnedMessages = messages
+                    currentPinnedMessageIndex = currentPinnedMessageIndex.coerceIn(0, maxOf(messages.lastIndex, 0))
+                    renderPinnedMessage(messages.getOrNull(currentPinnedMessageIndex))
                 }
             },
             onError = {
@@ -1153,9 +1204,15 @@ class MainActivity : AppCompatActivity() {
     private fun renderPinnedMessage(message: ChatMessage?) {
         if (message == null) {
             pinnedMessageCard.visibility = View.GONE
+            tvPinnedMessageCounter.text = ""
             return
         }
         pinnedMessageCard.visibility = View.VISIBLE
+        tvPinnedMessageCounter.text = getString(
+            R.string.chat_pinned_banner_counter,
+            currentPinnedMessageIndex + 1,
+            pinnedMessages.size.coerceAtLeast(1)
+        )
         tvPinnedMessageTitle.text = buildString {
             append(message.senderName)
             if (message.senderPlotName.isNotBlank()) {
@@ -1163,12 +1220,17 @@ class MainActivity : AppCompatActivity() {
                 append(message.senderPlotName)
             }
         }
+        tvPinnedMessageTitle.text = formatSenderWithPlot(message.senderName, message.senderPlotName)
         tvPinnedMessageBody.text = message.text
         pinnedMessageCard.setOnClickListener {
             val index = chatAdapter.currentList.indexOfFirst { it.id == message.id }
             if (index >= 0) {
                 tabLayout.getTabAt(1)?.select()
-                rvChat.scrollToPosition(index)
+                rvChat.smoothScrollToPosition(index)
+            }
+            if (pinnedMessages.size > 1) {
+                currentPinnedMessageIndex = (currentPinnedMessageIndex + 1) % pinnedMessages.size
+                renderPinnedMessage(pinnedMessages[currentPinnedMessageIndex])
             }
         }
     }
@@ -1319,6 +1381,7 @@ class MainActivity : AppCompatActivity() {
                             title = pushTitle,
                             body = title,
                             destination = "events",
+                            category = "events",
                             excludedUserIds = listOf(creator.id)
                         )
                     }
@@ -1327,6 +1390,7 @@ class MainActivity : AppCompatActivity() {
                 etEventMessage.text.clear()
                 etEventAmount.text.clear()
                 rbEventInfo.isChecked = true
+                toggleEventControlsPanel(forceCollapse = true)
                 toast(getString(R.string.event_created))
             } catch (error: Exception) {
                 toast(getString(R.string.event_create_failed, error.localizedMessage ?: getString(R.string.generic_error)))
@@ -1362,6 +1426,7 @@ class MainActivity : AppCompatActivity() {
                             title = getString(R.string.push_poll_created_title),
                             body = title,
                             destination = "polls",
+                            category = "polls",
                             excludedUserIds = listOf(creator.id)
                         )
                     }
@@ -1369,6 +1434,7 @@ class MainActivity : AppCompatActivity() {
                 etPollTitle.text.clear()
                 etPollMessage.text.clear()
                 etPollCreateOptions.text.clear()
+                togglePollCreatePanel(forceCollapse = true)
                 toast(getString(R.string.poll_create_success))
             } catch (error: Exception) {
                 toast(getString(R.string.event_create_failed, error.localizedMessage ?: getString(R.string.generic_error)))
@@ -1494,7 +1560,8 @@ class MainActivity : AppCompatActivity() {
                             userIds = listOf(request.userId),
                             title = getString(R.string.push_payment_confirmed_title),
                             body = getString(R.string.push_payment_confirmed_body, request.amount),
-                            destination = "events"
+                            destination = "events",
+                            category = "payments"
                         )
                     }
                 }
@@ -1533,7 +1600,8 @@ class MainActivity : AppCompatActivity() {
                                 R.string.push_payment_rejected_body,
                                 reason.ifBlank { getString(R.string.registration_request_reason_empty) }
                             ),
-                            destination = "events"
+                            destination = "events",
+                            category = "payments"
                         )
                     }
                 }
@@ -1637,6 +1705,7 @@ class MainActivity : AppCompatActivity() {
                                     title = if (isPoll) getString(R.string.push_poll_closed_title) else getString(R.string.push_charge_closed_title),
                                     body = event.title,
                                     destination = if (isPoll) "polls" else "events",
+                                    category = if (isPoll) "polls" else "events",
                                     excludedUserIds = listOf(reviewer.id)
                                 )
                             }
@@ -1692,7 +1761,13 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                val mentionedUsers = selectedMentionedUsers.filter { text.contains("@${it.fullName}") }
+                val everyoneTag = "@${getString(R.string.chat_mentions_everyone)}"
+                val mentionedUsers = buildList {
+                    addAll(selectedMentionedUsers.filter { text.contains("@${it.fullName}") })
+                    if (text.contains(everyoneTag)) {
+                        addAll(allUsers.filter { it.id != user.id })
+                    }
+                }.distinctBy { it.id }
                 withContext(Dispatchers.IO) {
                     repository.sendChatMessage(
                         sender = user,
@@ -1704,20 +1779,25 @@ class MainActivity : AppCompatActivity() {
                         title = getString(R.string.chat_push_new_message_title),
                         body = getString(R.string.chat_notification_body, user.fullName, text),
                         destination = "chat",
+                        category = "chat",
                         excludedUserIds = buildList {
                             add(user.id)
                             addAll(mentionedUsers.map { it.id })
                         }
                     )
-                    publishTargetedPush(
-                        userIds = mentionedUsers.map { it.id },
-                        title = getString(R.string.chat_notification_mention_title),
-                        body = getString(R.string.chat_notification_mention_body, user.fullName, text),
-                        destination = "chat"
-                    )
+                    if (mentionedUsers.isNotEmpty()) {
+                        publishTargetedPush(
+                            userIds = mentionedUsers.map { it.id },
+                            title = getString(R.string.chat_notification_mention_title),
+                            body = getString(R.string.chat_notification_mention_body, user.fullName, text),
+                            destination = "chat",
+                            category = "mention"
+                        )
+                    }
                 }
                 etChatMessage.text.clear()
                 selectedMentionedUsers.clear()
+                everyoneMentionActive = false
                 clearReplyTarget()
             } catch (_: Exception) {
                 toast(getString(R.string.chat_send_failed))
@@ -1742,6 +1822,7 @@ class MainActivity : AppCompatActivity() {
         resetUiState()
         loginContainer.visibility = View.VISIBLE
         dashboardContainer.visibility = View.GONE
+        btnOpenSettings.visibility = View.GONE
         etLoginPassword.text.clear()
     }
 
@@ -1791,6 +1872,18 @@ class MainActivity : AppCompatActivity() {
         isAdminPanelExpanded = if (forceCollapse) false else !isAdminPanelExpanded
         adminFormContainer.visibility = if (isAdminPanelExpanded) View.VISIBLE else View.GONE
         btnToggleAdminPanel.text = if (isAdminPanelExpanded) getString(R.string.admin_tools_close) else getString(R.string.admin_tools_open)
+    }
+
+    private fun toggleEventControlsPanel(forceCollapse: Boolean = false) {
+        isEventControlsExpanded = if (forceCollapse) false else !isEventControlsExpanded
+        eventControlsPanel.visibility = if (isEventControlsExpanded) View.VISIBLE else View.GONE
+        btnToggleEventControls.text = if (isEventControlsExpanded) getString(R.string.panel_collapse) else getString(R.string.panel_expand)
+    }
+
+    private fun togglePollCreatePanel(forceCollapse: Boolean = false) {
+        isPollCreateExpanded = if (forceCollapse) false else !isPollCreateExpanded
+        pollCreatePanel.visibility = if (isPollCreateExpanded) View.VISIBLE else View.GONE
+        btnTogglePollCreateControls.text = if (isPollCreateExpanded) getString(R.string.panel_collapse) else getString(R.string.panel_expand)
     }
 
     private fun togglePaymentRequestsPanel() {
@@ -2074,10 +2167,35 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) { repository.deleteChatMessage(message.id) }
+                latestMessages.removeAll { it.id == message.id }
+                olderMessages.removeAll { it.id == message.id }
+                pinnedMessages = pinnedMessages.filterNot { it.id == message.id }
+                if (replyingToMessage?.id == message.id) {
+                    replyingToMessage = null
+                    tvReplyingToTitle.text = getString(R.string.chat_reply_deleted)
+                    tvReplyingToBody.text = getString(R.string.chat_reply_deleted)
+                    chatReplyPreviewContainer.visibility = View.GONE
+                }
+                currentPinnedMessageIndex = currentPinnedMessageIndex.coerceIn(0, maxOf(pinnedMessages.lastIndex, 0))
+                renderPinnedMessage(pinnedMessages.getOrNull(currentPinnedMessageIndex))
+                updateChatList()
                 toast(getString(R.string.chat_delete_success))
             } catch (_: Exception) {
                 toast(getString(R.string.chat_delete_failed))
             }
+        }
+    }
+
+    private fun openReplyTarget(messageId: String) {
+        if (messageId.isBlank()) return
+        val targetIndex = chatAdapter.currentList.indexOfFirst { it.id == messageId }
+        if (targetIndex < 0) {
+            toast(getString(R.string.chat_reply_deleted))
+            return
+        }
+        tabLayout.getTabAt(1)?.select()
+        rvChat.post {
+            rvChat.smoothScrollToPosition(targetIndex)
         }
     }
 
@@ -2107,6 +2225,7 @@ class MainActivity : AppCompatActivity() {
                 append(message.senderPlotName)
             }
         }
+        tvReplyingToTitle.text = getString(R.string.chat_reply_to_prefix, formatSenderWithPlot(message.senderName, message.senderPlotName))
         tvReplyingToBody.text = message.text
         chatReplyPreviewContainer.visibility = View.VISIBLE
         tabLayout.getTabAt(1)?.select()
@@ -2116,6 +2235,110 @@ class MainActivity : AppCompatActivity() {
     private fun clearReplyTarget() {
         replyingToMessage = null
         chatReplyPreviewContainer.visibility = View.GONE
+    }
+
+    private fun openInlineMentionPicker() {
+        if (allUsers.isEmpty()) {
+            toast(getString(R.string.chat_mentions_empty))
+            return
+        }
+        val candidates = allUsers.filter { it.id != currentUser?.id }
+        val everyoneLabel = "@${getString(R.string.chat_mentions_everyone)}"
+        val labels = buildList {
+            add(everyoneLabel)
+            addAll(candidates.map {
+                buildString {
+                    append("@")
+                    append(it.fullName)
+                    if (it.plotName.isNotBlank()) {
+                        append(" • ")
+                        append(it.plotName)
+                    }
+                }
+            })
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.chat_mentions_picker_title)
+            .setItems(labels) { _, which ->
+                if (which == 0) {
+                    everyoneMentionActive = true
+                    insertMentionToken(everyoneLabel)
+                    return@setItems
+                }
+                val selected = candidates.getOrNull(which - 1) ?: return@setItems
+                selectedMentionedUsers.add(selected)
+                insertMentionToken("@${selected.fullName}")
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun insertMentionToken(token: String) {
+        val currentText = etChatMessage.text?.toString().orEmpty()
+        val atIndex = currentText.lastIndexOf('@')
+        val updatedText = if (atIndex >= 0) {
+            currentText.substring(0, atIndex) + token + " "
+        } else {
+            "$currentText$token "
+        }
+        suppressMentionPicker = true
+        etChatMessage.setText(updatedText)
+        etChatMessage.setSelection(etChatMessage.text?.length ?: 0)
+        suppressMentionPicker = false
+    }
+
+    private fun showModernMentionPicker() {
+        if (allUsers.isEmpty()) {
+            toast(getString(R.string.chat_mentions_empty))
+            return
+        }
+        val candidates = allUsers.filter { it.id != currentUser?.id }
+        val everyoneLabel = "@${getString(R.string.chat_mentions_everyone)}"
+        val labels = buildList {
+            add(everyoneLabel)
+            addAll(candidates.map { user ->
+                buildString {
+                    append("@")
+                    append(user.fullName)
+                    val plots = formatUserPlots(user)
+                    if (plots.isNotBlank()) {
+                        append(" | ")
+                        append(plots)
+                    }
+                }
+            })
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.chat_mentions_picker_title)
+            .setItems(labels) { _, which ->
+                if (which == 0) {
+                    everyoneMentionActive = true
+                    insertMentionToken(everyoneLabel)
+                    return@setItems
+                }
+                val selected = candidates.getOrNull(which - 1) ?: return@setItems
+                selectedMentionedUsers.add(selected)
+                insertMentionToken("@${selected.fullName}")
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun formatUserPlots(user: RemoteUser): String {
+        val normalizedPlots = user.plots
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        return when {
+            normalizedPlots.isNotEmpty() -> normalizedPlots.joinToString(", ")
+            user.plotName.isNotBlank() -> user.plotName.trim()
+            else -> ""
+        }
+    }
+
+    private fun formatSenderWithPlot(senderName: String, plotName: String): String {
+        return if (plotName.isBlank()) senderName else "$senderName | $plotName"
     }
 
     private fun showMentionPicker() {
@@ -2164,6 +2387,78 @@ class MainActivity : AppCompatActivity() {
                 toast(getString(R.string.chat_pin_failed))
             }
         }
+    }
+
+    private fun showSettingsDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
+        val themeGroup = dialogView.findViewById<RadioGroup>(R.id.rgThemeMode)
+        val rbThemeSystem = dialogView.findViewById<RadioButton>(R.id.rbThemeSystem)
+        val rbThemeLight = dialogView.findViewById<RadioButton>(R.id.rbThemeLight)
+        val rbThemeDark = dialogView.findViewById<RadioButton>(R.id.rbThemeDark)
+        val switchChatMessages = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsChatMessages)
+        val switchChatMentions = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsChatMentions)
+        val switchEvents = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsEvents)
+        val switchPolls = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsPolls)
+        val switchPayments = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsPayments)
+        val switchRegistration = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsRegistration)
+        val userId = currentUser?.id
+
+        when (eventStateStore.getThemeMode()) {
+            EventStateStore.ThemeMode.SYSTEM -> rbThemeSystem.isChecked = true
+            EventStateStore.ThemeMode.LIGHT -> rbThemeLight.isChecked = true
+            EventStateStore.ThemeMode.DARK -> rbThemeDark.isChecked = true
+        }
+
+        if (userId != null) {
+            switchChatMessages.isChecked = eventStateStore.isChatNotificationsEnabled(userId)
+            switchChatMentions.isChecked = eventStateStore.isMentionNotificationsEnabled(userId)
+            switchEvents.isChecked = eventStateStore.isEventNotificationsEnabled(userId)
+            switchPolls.isChecked = eventStateStore.isPollNotificationsEnabled(userId)
+            switchPayments.isChecked = eventStateStore.isPaymentNotificationsEnabled(userId)
+            switchRegistration.isChecked = eventStateStore.isRegistrationNotificationsEnabled(userId)
+        } else {
+            listOf(
+                switchChatMessages,
+                switchChatMentions,
+                switchEvents,
+                switchPolls,
+                switchPayments,
+                switchRegistration
+            ).forEach { it.isEnabled = false }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.settings_title)
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val selectedTheme = when (themeGroup.checkedRadioButtonId) {
+                    R.id.rbThemeLight -> EventStateStore.ThemeMode.LIGHT
+                    R.id.rbThemeDark -> EventStateStore.ThemeMode.DARK
+                    else -> EventStateStore.ThemeMode.SYSTEM
+                }
+                eventStateStore.setThemeMode(selectedTheme)
+                applyThemeMode(selectedTheme)
+                userId?.let {
+                    eventStateStore.setChatNotificationsEnabled(it, switchChatMessages.isChecked)
+                    eventStateStore.setMentionNotificationsEnabled(it, switchChatMentions.isChecked)
+                    eventStateStore.setEventNotificationsEnabled(it, switchEvents.isChecked)
+                    eventStateStore.setPollNotificationsEnabled(it, switchPolls.isChecked)
+                    eventStateStore.setPaymentNotificationsEnabled(it, switchPayments.isChecked)
+                    eventStateStore.setRegistrationNotificationsEnabled(it, switchRegistration.isChecked)
+                }
+                toast(getString(R.string.settings_saved))
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun applyThemeMode(mode: EventStateStore.ThemeMode) {
+        val nightMode = when (mode) {
+            EventStateStore.ThemeMode.SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            EventStateStore.ThemeMode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+            EventStateStore.ThemeMode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
+        }
+        AppCompatDelegate.setDefaultNightMode(nightMode)
     }
 
     private fun openRegistrationDialog() {
@@ -2413,7 +2708,8 @@ class MainActivity : AppCompatActivity() {
                             userIds = listOf(request.id),
                             title = getString(R.string.push_registration_approved_title),
                             body = getString(R.string.push_registration_approved_body),
-                            destination = "events"
+                            destination = "events",
+                            category = "registration"
                         )
                     }
                 }
@@ -2452,7 +2748,8 @@ class MainActivity : AppCompatActivity() {
                                 R.string.push_registration_rejected_body,
                                 reason.ifBlank { getString(R.string.registration_request_reason_empty) }
                             ),
-                            destination = "events"
+                            destination = "events",
+                            category = "registration"
                         )
                     }
                 }
@@ -2503,22 +2800,24 @@ class MainActivity : AppCompatActivity() {
         title: String,
         body: String,
         destination: String,
+        category: String = destination,
         excludedUserIds: List<String> = emptyList()
     ) {
         if (!pushBackendClient.isConfigured()) return
         val idToken = currentFirebaseIdToken() ?: return
-        pushBackendClient.publishBroadcast(idToken, title, body, destination, excludedUserIds)
+        pushBackendClient.publishBroadcast(idToken, title, body, destination, category, excludedUserIds)
     }
 
     private suspend fun publishTargetedPush(
         userIds: List<String>,
         title: String,
         body: String,
-        destination: String
+        destination: String,
+        category: String = destination
     ) {
         if (!pushBackendClient.isConfigured() || userIds.isEmpty()) return
         val idToken = currentFirebaseIdToken() ?: return
-        pushBackendClient.publishToUsers(idToken, userIds, title, body, destination)
+        pushBackendClient.publishToUsers(idToken, userIds, title, body, destination, category)
     }
 
     private fun toast(message: String) {

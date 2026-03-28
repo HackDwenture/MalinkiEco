@@ -21,6 +21,7 @@ class ChatAdapter(
     private val currentUserIdProvider: () -> String?,
     private val readerCutoffProvider: () -> Long,
     private val onReplyMessage: (ChatMessage) -> Unit,
+    private val onOpenReplyTarget: (ChatMessage) -> Unit,
     private val onTogglePinMessage: (ChatMessage) -> Unit,
     private val onEditMessage: (ChatMessage) -> Unit,
     private val onDeleteMessage: (ChatMessage) -> Unit
@@ -64,8 +65,10 @@ class ChatAdapter(
             mentionBadge.visibility = if (currentUserId != null && item.mentionedUserIds.contains(currentUserId)) View.VISIBLE else View.GONE
             if (item.replyToMessageId.isBlank()) {
                 replyContainer.visibility = View.GONE
+                replyContainer.setOnClickListener(null)
             } else {
                 replyContainer.visibility = View.VISIBLE
+                val repliedMessageExists = currentList.any { it.id == item.replyToMessageId }
                 replySender.text = buildString {
                     append(item.replyToSenderName)
                     if (item.replyToSenderPlotName.isNotBlank()) {
@@ -73,7 +76,11 @@ class ChatAdapter(
                         append(item.replyToSenderPlotName)
                     }
                 }
-                replyText.text = item.replyToText
+                replyText.text = if (repliedMessageExists) item.replyToText else itemView.context.getString(R.string.chat_reply_deleted)
+                replySender.text = formatReplySender(item.replyToSenderName, item.replyToSenderPlotName)
+                replyContainer.setOnClickListener(if (repliedMessageExists) View.OnClickListener {
+                    onOpenReplyTarget(item)
+                } else null)
             }
 
             val isMine = item.senderId == currentUserId
@@ -144,6 +151,10 @@ class ChatAdapter(
         override fun areItemsTheSame(oldItem: ChatMessage, newItem: ChatMessage): Boolean = oldItem.id == newItem.id
 
         override fun areContentsTheSame(oldItem: ChatMessage, newItem: ChatMessage): Boolean = oldItem == newItem
+    }
+
+    private fun formatReplySender(senderName: String, plotName: String): String {
+        return if (plotName.isBlank()) senderName else "$senderName | $plotName"
     }
 
     companion object {

@@ -75,6 +75,7 @@ app.post("/api/notifications/publish", authenticateFirebaseUser, async (req, res
     const body = String(req.body?.body || "").trim();
     const audience = String(req.body?.audience || "").trim();
     const destination = String(req.body?.destination || "events").trim() || "events";
+    const category = String(req.body?.category || destination || "events").trim() || "events";
     const targetUserIds = Array.isArray(req.body?.targetUserIds)
       ? req.body.targetUserIds.map(String).map((it) => it.trim()).filter(Boolean)
       : [];
@@ -108,7 +109,8 @@ app.post("/api/notifications/publish", authenticateFirebaseUser, async (req, res
       data: {
         title,
         body,
-        destination
+        destination,
+        category
       },
       android: {
         priority: "high",

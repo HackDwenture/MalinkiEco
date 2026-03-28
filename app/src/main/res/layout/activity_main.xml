@@ -76,6 +76,19 @@
                     android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                     android:textColor="@color/on_primary_light" />
             </LinearLayout>
+
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnOpenSettings"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@string/settings_button"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:padding="10dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_settings_gear"
+                android:tint="@color/on_primary_light"
+                android:visibility="gone"
+                app:srcCompat="@drawable/ic_settings_gear" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -309,115 +322,138 @@
                         android:orientation="vertical"
                         android:padding="16dp">
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/event_tools"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textStyle="bold" />
-
-                        <com.google.android.material.textfield.TextInputLayout
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp">
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
 
-                            <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/etEventTitle"
-                                android:layout_width="match_parent"
+                            <TextView
+                                android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:hint="@string/event_title_hint" />
-                        </com.google.android.material.textfield.TextInputLayout>
+                                android:layout_weight="1"
+                                android:text="@string/create_event_panel_title"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textStyle="bold" />
 
-                        <RadioGroup
-                            android:id="@+id/rgEventType"
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnToggleEventControls"
+                                style="?attr/materialButtonOutlinedStyle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/panel_expand" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/eventControlsPanel"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:orientation="vertical">
-
-                            <RadioButton
-                                android:id="@+id/rbEventInfo"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:checked="true"
-                                android:text="@string/event_info_button" />
-
-                            <RadioButton
-                                android:id="@+id/rbEventCharge"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
-                                android:text="@string/event_charge_button" />
-
-                            <RadioButton
-                                android:id="@+id/rbEventExpense"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
-                                android:text="@string/event_expense_button" />
-
-                            <RadioButton
-                                android:id="@+id/rbEventPoll"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
-                                android:text="@string/event_poll_button"
-                                android:visibility="gone" />
-                        </RadioGroup>
-
-                        <com.google.android.material.textfield.TextInputLayout
-                            android:id="@+id/eventAmountLayout"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:hint="@string/event_amount_hint"
+                            android:orientation="vertical"
                             android:visibility="gone">
 
-                            <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/etEventAmount"
+                            <com.google.android.material.textfield.TextInputLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:inputType="number" />
-                        </com.google.android.material.textfield.TextInputLayout>
+                                android:layout_marginTop="12dp">
 
-                        <com.google.android.material.textfield.TextInputLayout
-                            android:id="@+id/pollOptionsLayout"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:hint="@string/poll_options_hint"
-                            android:visibility="gone">
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etEventTitle"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:hint="@string/event_title_hint" />
+                            </com.google.android.material.textfield.TextInputLayout>
 
-                            <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/etPollOptions"
+                            <RadioGroup
+                                android:id="@+id/rgEventType"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:gravity="top|start"
-                                android:inputType="textMultiLine|textCapSentences"
-                                android:minLines="3" />
-                        </com.google.android.material.textfield.TextInputLayout>
+                                android:layout_marginTop="10dp"
+                                android:orientation="vertical">
 
-                        <com.google.android.material.textfield.TextInputLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp">
+                                <RadioButton
+                                    android:id="@+id/rbEventInfo"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:checked="true"
+                                    android:text="@string/event_info_button" />
 
-                            <com.google.android.material.textfield.TextInputEditText
-                                android:id="@+id/etEventMessage"
+                                <RadioButton
+                                    android:id="@+id/rbEventCharge"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:text="@string/event_charge_button" />
+
+                                <RadioButton
+                                    android:id="@+id/rbEventExpense"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:text="@string/event_expense_button" />
+
+                                <RadioButton
+                                    android:id="@+id/rbEventPoll"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:text="@string/event_poll_button"
+                                    android:visibility="gone" />
+                            </RadioGroup>
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:id="@+id/eventAmountLayout"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:hint="@string/event_message_hint"
-                                android:gravity="top|start"
-                                android:inputType="textMultiLine|textCapSentences"
-                                android:minLines="4" />
-                        </com.google.android.material.textfield.TextInputLayout>
+                                android:layout_marginTop="10dp"
+                                android:hint="@string/event_amount_hint"
+                                android:visibility="gone">
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnCreateEvent"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:text="@string/create_event_button" />
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etEventAmount"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:inputType="number" />
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:id="@+id/pollOptionsLayout"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:hint="@string/poll_options_hint"
+                                android:visibility="gone">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etPollOptions"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="top|start"
+                                    android:inputType="textMultiLine|textCapSentences"
+                                    android:minLines="3" />
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.textfield.TextInputLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp">
+
+                                <com.google.android.material.textfield.TextInputEditText
+                                    android:id="@+id/etEventMessage"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:hint="@string/event_message_hint"
+                                    android:gravity="top|start"
+                                    android:inputType="textMultiLine|textCapSentences"
+                                    android:minLines="4" />
+                            </com.google.android.material.textfield.TextInputLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnCreateEvent"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                android:text="@string/create_event_button" />
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -722,61 +758,84 @@
                             android:orientation="vertical"
                             android:padding="16dp">
 
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/poll_create_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textStyle="bold" />
-
-                            <com.google.android.material.textfield.TextInputLayout
+                            <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="12dp">
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
 
-                                <com.google.android.material.textfield.TextInputEditText
-                                    android:id="@+id/etPollTitle"
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="@string/poll_create_title"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textStyle="bold" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnTogglePollCreateControls"
+                                    style="?attr/materialButtonOutlinedStyle"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/panel_expand" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:id="@+id/pollCreatePanel"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:visibility="gone">
+
+                                <com.google.android.material.textfield.TextInputLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:hint="@string/event_title_hint" />
-                            </com.google.android.material.textfield.TextInputLayout>
+                                    android:layout_marginTop="12dp">
 
-                            <com.google.android.material.textfield.TextInputLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="10dp">
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etPollTitle"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:hint="@string/event_title_hint" />
+                                </com.google.android.material.textfield.TextInputLayout>
 
-                                <com.google.android.material.textfield.TextInputEditText
-                                    android:id="@+id/etPollMessage"
+                                <com.google.android.material.textfield.TextInputLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:hint="@string/event_message_hint"
-                                    android:gravity="top|start"
-                                    android:inputType="textMultiLine|textCapSentences"
-                                    android:minLines="3" />
-                            </com.google.android.material.textfield.TextInputLayout>
+                                    android:layout_marginTop="10dp">
 
-                            <com.google.android.material.textfield.TextInputLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="10dp"
-                                android:hint="@string/poll_options_hint">
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etPollMessage"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:hint="@string/event_message_hint"
+                                        android:gravity="top|start"
+                                        android:inputType="textMultiLine|textCapSentences"
+                                        android:minLines="3" />
+                                </com.google.android.material.textfield.TextInputLayout>
 
-                                <com.google.android.material.textfield.TextInputEditText
-                                    android:id="@+id/etPollCreateOptions"
+                                <com.google.android.material.textfield.TextInputLayout
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:gravity="top|start"
-                                    android:inputType="textMultiLine|textCapSentences"
-                                    android:minLines="3" />
-                            </com.google.android.material.textfield.TextInputLayout>
+                                    android:layout_marginTop="10dp"
+                                    android:hint="@string/poll_options_hint">
 
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnCreatePoll"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="12dp"
-                                android:text="@string/poll_create_button" />
+                                    <com.google.android.material.textfield.TextInputEditText
+                                        android:id="@+id/etPollCreateOptions"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:gravity="top|start"
+                                        android:inputType="textMultiLine|textCapSentences"
+                                        android:minLines="3" />
+                                </com.google.android.material.textfield.TextInputLayout>
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnCreatePoll"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:text="@string/poll_create_button" />
+                            </LinearLayout>
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
@@ -1112,7 +1171,7 @@
                     android:id="@+id/pinnedMessageCard"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="10dp"
+                    android:layout_marginBottom="8dp"
                     android:visibility="gone"
                     app:cardBackgroundColor="@color/primary_container_light"
                     app:strokeColor="@color/primary_light"
@@ -1122,21 +1181,26 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="14dp">
+                        android:paddingStart="12dp"
+                        android:paddingTop="10dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="10dp">
 
                         <TextView
-                            android:layout_width="wrap_content"
+                            android:id="@+id/tvPinnedMessageCounter"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/chat_pinned_banner_title"
                             android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                             android:textColor="@color/primary_light"
-                            android:textStyle="bold" />
+                            android:textStyle="bold"
+                            tools:text="Закреплено 1 из 3" />
 
                         <TextView
                             android:id="@+id/tvPinnedMessageTitle"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
+                            android:layout_marginTop="4dp"
+                            android:maxLines="1"
                             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                             android:textStyle="bold" />
 
@@ -1144,45 +1208,9 @@
                             android:id="@+id/tvPinnedMessageBody"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:maxLines="2"
+                            android:layout_marginTop="2dp"
+                            android:maxLines="1"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/chatNotificationsCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="10dp"
-                    app:cardBackgroundColor="@color/surface_light">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="14dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/chat_notifications_title"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                            android:textStyle="bold" />
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switchChatNotifications"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:text="@string/chat_notifications_toggle" />
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/switchMentionNotifications"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="@string/chat_mentions_toggle" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -1261,31 +1289,33 @@
                                 android:layout_width="40dp"
                                 android:layout_height="40dp"
                                 android:contentDescription="@string/chat_cancel_reply"
-                                app:icon="@android:drawable/ic_menu_close_clear_cancel" />
+                                android:padding="0dp"
+                                app:icon="@android:drawable/ic_menu_close_clear_cancel"
+                                app:iconGravity="textTop"
+                                app:iconPadding="0dp" />
                         </LinearLayout>
 
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="bottom"
+                            android:gravity="center_vertical"
                             android:orientation="horizontal">
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnAttachPlaceholder"
                                 style="?attr/materialButtonOutlinedStyle"
-                                android:layout_width="44dp"
-                                android:layout_height="44dp"
+                                android:layout_width="46dp"
+                                android:layout_height="46dp"
                                 android:contentDescription="@string/chat_attachment_placeholder"
-                                app:icon="@android:drawable/ic_menu_add" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnMentionUser"
-                                style="?attr/materialButtonOutlinedStyle"
-                                android:layout_width="44dp"
-                                android:layout_height="44dp"
-                                android:layout_marginStart="8dp"
-                                android:contentDescription="@string/chat_mention_user"
-                                app:icon="@android:drawable/ic_menu_myplaces" />
+                                android:insetTop="0dp"
+                                android:insetBottom="0dp"
+                                android:minWidth="0dp"
+                                android:padding="0dp"
+                                android:text=""
+                                app:cornerRadius="23dp"
+                                app:icon="@drawable/ic_attach"
+                                app:iconGravity="textTop"
+                                app:iconPadding="0dp" />
 
                             <com.google.android.material.textfield.TextInputLayout
                                 android:id="@+id/chatComposerInputLayout"
