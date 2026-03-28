@@ -324,6 +324,14 @@ class MainActivity : AppCompatActivity() {
             firestore = FirebaseFirestore.getInstance()
         )
         eventStateStore = EventStateStore(applicationContext)
+        if (pushBackendClient.isConfigured()) {
+            runCatching {
+                FirebaseMessaging.getInstance().isAutoInitEnabled = true
+                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                    eventStateStore.setCachedFcmToken(token)
+                }
+            }
+        }
 
         bindViews()
         setupLists()
@@ -2901,9 +2909,15 @@ class MainActivity : AppCompatActivity() {
     private suspend fun registerDeviceForPush() {
         if (!pushBackendClient.isConfigured()) return
         val userId = currentUser?.id ?: return
+        FirebaseMessaging.getInstance().isAutoInitEnabled = true
         repeat(3) { attempt ->
             val idToken = currentFirebaseIdToken() ?: return
-            val fcmToken = FirebaseMessaging.getInstance().token.awaitResult()
+            val cachedToken = eventStateStore.getCachedFcmToken()
+            val fcmToken = if (cachedToken.isNotBlank()) {
+                cachedToken
+            } else {
+                FirebaseMessaging.getInstance().token.awaitResult().also { eventStateStore.setCachedFcmToken(it) }
+            }
             runCatching {
                 pushBackendClient.registerDeviceToken(idToken, fcmToken)
                 pushBackendClient.getRegisteredDeviceCount(idToken)
@@ -2914,11 +2928,15 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 if (attempt < 2) {
+                    FirebaseMessaging.getInstance().token.awaitResult().also { eventStateStore.setCachedFcmToken(it) }
                     kotlinx.coroutines.delay(1200)
                 }
             }.onFailure {
                 eventStateStore.setPushRegistrationConfirmed(userId, false)
                 if (attempt < 2) {
+                    runCatching {
+                        FirebaseMessaging.getInstance().token.awaitResult().also { eventStateStore.setCachedFcmToken(it) }
+                    }
                     kotlinx.coroutines.delay(1200)
                 }
             }

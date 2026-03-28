@@ -3,6 +3,7 @@ package com.example.malinkieco.notifications
 import com.example.malinkieco.R
 import com.example.malinkieco.data.PushBackendClient
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -35,6 +36,8 @@ class MalinkiMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
+        val store = EventStateStore(applicationContext)
+        store.setCachedFcmToken(token)
         val auth = FirebaseAuth.getInstance()
         val user = auth.currentUser ?: return
         val client = PushBackendClient()
@@ -46,7 +49,7 @@ class MalinkiMessagingService : FirebaseMessagingService() {
                 Thread {
                     runCatching {
                         client.registerDeviceToken(idToken, token)
-                        EventStateStore(applicationContext).setPushRegistrationConfirmed(user.uid, true)
+                        store.setPushRegistrationConfirmed(user.uid, true)
                     }
                 }.start()
             }

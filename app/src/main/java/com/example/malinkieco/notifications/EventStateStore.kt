@@ -115,6 +115,14 @@ class EventStateStore(context: Context) {
         preferences.edit().putBoolean(pushRegistrationConfirmedKey(userId), confirmed).apply()
     }
 
+    fun getCachedFcmToken(): String {
+        return preferences.getString(cachedFcmTokenKey(), "").orEmpty()
+    }
+
+    fun setCachedFcmToken(token: String) {
+        preferences.edit().putString(cachedFcmTokenKey(), token).apply()
+    }
+
     fun getThemeMode(): ThemeMode {
         val raw = preferences.getString(themeModeKey(), ThemeMode.SYSTEM.name).orEmpty()
         return runCatching { ThemeMode.valueOf(raw) }.getOrDefault(ThemeMode.SYSTEM)
@@ -194,6 +202,8 @@ class EventStateStore(context: Context) {
     private fun registrationNotificationsEnabledKey(userId: String): String = "registration_notifications_enabled_$userId"
 
     private fun pushRegistrationConfirmedKey(userId: String): String = "push_registration_confirmed_$userId"
+
+    private fun cachedFcmTokenKey(): String = "cached_fcm_token"
 
     private fun themeModeKey(): String = "theme_mode"
 
