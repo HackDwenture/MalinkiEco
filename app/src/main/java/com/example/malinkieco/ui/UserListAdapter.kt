@@ -39,6 +39,7 @@ class UserListAdapter(
         private val role: TextView = itemView.findViewById(R.id.tvUserRole)
         private val balance: TextView = itemView.findViewById(R.id.tvUserBalance)
         private val status: TextView = itemView.findViewById(R.id.tvUserStatus)
+        private val balanceActionsRow: LinearLayout = itemView.findViewById(R.id.balanceActionsRow)
         private val editBalanceButton: ImageButton = itemView.findViewById(R.id.btnEditBalance)
         private val deleteButton: Button = itemView.findViewById(R.id.btnDeleteUser)
         private val moderatorRow: LinearLayout = itemView.findViewById(R.id.moderatorButtonsRow)
@@ -52,9 +53,7 @@ class UserListAdapter(
             balance.text = itemView.context.getString(R.string.balance_format, user.balance)
             status.text = balanceStatus(user.balance)
 
-            val adminVisibility = if (canManageUsers) View.VISIBLE else View.GONE
-            editBalanceButton.visibility = adminVisibility
-            deleteButton.visibility = adminVisibility
+            balanceActionsRow.visibility = if (canManageUsers) View.VISIBLE else View.GONE
 
             val canManageModerator = canManageModerators &&
                 user.id != currentUserIdProvider() &&

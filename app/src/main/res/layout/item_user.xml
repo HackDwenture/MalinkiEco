@@ -59,6 +59,7 @@
             android:textAppearance="@style/TextAppearance.Material3.LabelLarge" />
 
         <LinearLayout
+            android:id="@+id/balanceActionsRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"

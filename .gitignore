@@ -6,11 +6,14 @@
 /.idea/libraries
 /.idea/modules.xml
 /.idea/workspace.xml
+/.idea/vcs.xml
+/.idea/deploymentTargetSelector.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
 /app/build
+/app/release
 /app/google-services.json
 /functions/node_modules
 /.kotlin

@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.malinkieco"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.3 beta"
         buildConfigField("String", "PAYMENTS_BACKEND_URL", "\"$paymentsBackendUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -41,6 +41,14 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("MalinkiEco-v1.3-beta.apk")
+        }
     }
 }
 
