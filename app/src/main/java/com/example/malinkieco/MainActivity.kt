@@ -1531,7 +1531,7 @@ class MainActivity : AppCompatActivity() {
                             title = getString(R.string.push_payment_rejected_title),
                             body = getString(
                                 R.string.push_payment_rejected_body,
-                                reason.ifBlank { getString(R.string.payment_request_reason_empty) }
+                                reason.ifBlank { getString(R.string.registration_request_reason_empty) }
                             ),
                             destination = "events"
                         )

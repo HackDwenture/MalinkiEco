@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">MalinkiEco</string>
     <string name="tagline">Поселок, платежи, события и общий чат в одном приложении</string>
-    <string name="app_version_label">v1.0 beta</string>
+    <string name="app_version_label">v2.0b</string>
     <string name="welcome_title">Вход в систему</string>
     <string name="login_hint">Почта</string>
     <string name="password_hint">Пароль</string>
