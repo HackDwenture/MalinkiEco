@@ -12,10 +12,13 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -23,6 +26,7 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.RadioButton
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -30,6 +34,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.content.pm.PackageInfoCompat
+import androidx.core.widget.NestedScrollView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -53,6 +58,7 @@ import com.example.malinkieco.data.Role
 import com.example.malinkieco.notifications.EventReminderScheduler
 import com.example.malinkieco.notifications.EventStateStore
 import com.example.malinkieco.notifications.EventNotificationHelper
+import com.example.malinkieco.util.PhoneFormatUtils
 import com.example.malinkieco.ui.AuditLogAdapter
 import com.example.malinkieco.ui.ChatAdapter
 import com.example.malinkieco.ui.EventAdapter
@@ -75,6 +81,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -87,10 +94,18 @@ class MainActivity : AppCompatActivity() {
         val type: EventType
     )
 
+    private data class PaymentDetailItem(
+        val label: String,
+        val value: String,
+        val copyValue: String = value
+    )
+
     private lateinit var loginContainer: LinearLayout
     private lateinit var dashboardContainer: LinearLayout
     private lateinit var eventsContainer: View
     private lateinit var eventsContent: LinearLayout
+    private lateinit var paymentsContainer: View
+    private lateinit var paymentsContent: LinearLayout
     private lateinit var communityFundsCard: View
     private lateinit var pollsContainer: View
     private lateinit var pollCreateControls: View
@@ -112,14 +127,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvWelcomeDetails: TextView
     private lateinit var tvBalanceHero: TextView
     private lateinit var tvBalanceHeroStatus: TextView
+    private lateinit var btnOpenPayments: Button
+    private lateinit var announcementControls: View
+    private lateinit var announcementControlsPanel: View
+    private lateinit var btnToggleAnnouncementControls: Button
+    private lateinit var etAnnouncementTitle: EditText
+    private lateinit var etAnnouncementMessage: EditText
+    private lateinit var btnCreateAnnouncement: Button
     private lateinit var tvCommunityFunds: TextView
     private lateinit var btnEditCommunityFunds: Button
-    private lateinit var btnLogout: Button
     private lateinit var unreadEventsBanner: View
     private lateinit var tvUnreadEventsTitle: TextView
     private lateinit var tvUnreadEventsSubtitle: TextView
     private lateinit var btnMarkEventsRead: Button
     private lateinit var btnLoadMoreEvents: Button
+    private lateinit var paymentTopBar: View
+    private lateinit var btnClosePayments: Button
     private lateinit var appGateContainer: LinearLayout
     private lateinit var tvGateTitle: TextView
     private lateinit var tvGateMessage: TextView
@@ -160,12 +183,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var paymentConfigCard: View
     private lateinit var paymentConfigPanel: View
     private lateinit var btnTogglePaymentConfig: Button
+    private lateinit var paymentTransferInfoCard: View
     private lateinit var etRecipientName: EditText
     private lateinit var etRecipientPhone: EditText
     private lateinit var etRecipientBank: EditText
+    private lateinit var etRecipientAccount: EditText
+    private lateinit var etPaymentPurposeConfig: EditText
+    private lateinit var etRecipientBik: EditText
+    private lateinit var etCorrespondentAccount: EditText
+    private lateinit var etRecipientInn: EditText
+    private lateinit var etRecipientKpp: EditText
     private lateinit var etSbpLink: EditText
     private lateinit var btnSavePaymentConfig: Button
     private lateinit var tvPaymentTransferInfo: TextView
+    private lateinit var paymentDetailsContainer: LinearLayout
     private lateinit var btnOpenSbp: Button
     private lateinit var btnCopyPaymentDetails: Button
     private lateinit var rvEvents: RecyclerView
@@ -236,6 +267,7 @@ class MainActivity : AppCompatActivity() {
     private var communityFundsListener: ListenerRegistration? = null
     private var pinnedMessageListener: ListenerRegistration? = null
     private var isAdminPanelExpanded = false
+    private var isAnnouncementControlsExpanded = false
     private var isEventControlsExpanded = false
     private var isPollCreateExpanded = false
     private var isPaymentConfigExpanded = false
@@ -247,6 +279,7 @@ class MainActivity : AppCompatActivity() {
 
     private val latestMessages = mutableListOf<ChatMessage>()
     private val olderMessages = mutableListOf<ChatMessage>()
+    private val pendingLocalMessages = mutableListOf<ChatMessage>()
     private var pinnedMessages = emptyList<ChatMessage>()
     private var currentPinnedMessageIndex = 0
     private var replyingToMessage: ChatMessage? = null
@@ -264,6 +297,26 @@ class MainActivity : AppCompatActivity() {
     private var hasInitializedChatNotifications = false
     private var pendingNotificationDestination: String? = null
     private var suppressMentionPicker = false
+    private var lastSelectedTabBeforePayments = TAB_EVENTS
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val connectivityWatchdog = object : Runnable {
+        override fun run() {
+            if (!hasInternetConnection()) {
+                checkStartupRequirements()
+            }
+            mainHandler.postDelayed(this, CONNECTIVITY_WATCHDOG_MS)
+        }
+    }
+    private val chatReadRetryFast = Runnable {
+        if (::chatContainer.isInitialized && chatContainer.visibility == View.VISIBLE) {
+            markChatRead()
+        }
+    }
+    private val chatReadRetrySlow = Runnable {
+        if (::chatContainer.isInitialized && chatContainer.visibility == View.VISIBLE) {
+            markChatRead()
+        }
+    }
 
     private val chatMentionWatcher = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -337,18 +390,41 @@ class MainActivity : AppCompatActivity() {
         setupLists()
         setupTabs()
         setupListeners()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isPaymentsScreenOpen()) {
+                    closePaymentsScreen()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        })
         captureNotificationDestination(intent)
         checkStartupRequirements()
     }
 
     override fun onResume() {
         super.onResume()
+        EventNotificationHelper.setAppInForeground(true)
+        EventNotificationHelper.cancelAll(this)
+        mainHandler.removeCallbacks(connectivityWatchdog)
+        mainHandler.postDelayed(connectivityWatchdog, CONNECTIVITY_WATCHDOG_MS)
         checkStartupRequirements()
         if (currentUser != null && pushBackendClient.isConfigured()) {
             lifecycleScope.launch {
                 runCatching { registerDeviceForPush() }
             }
         }
+    }
+
+    override fun onPause() {
+        EventNotificationHelper.setAppInForeground(false)
+        mainHandler.removeCallbacks(connectivityWatchdog)
+        mainHandler.removeCallbacks(chatReadRetryFast)
+        mainHandler.removeCallbacks(chatReadRetrySlow)
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -359,6 +435,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(connectivityWatchdog)
+        mainHandler.removeCallbacks(chatReadRetryFast)
+        mainHandler.removeCallbacks(chatReadRetrySlow)
         usersListener?.remove()
         chatListener?.remove()
         eventsListener?.remove()
@@ -376,6 +455,8 @@ class MainActivity : AppCompatActivity() {
         dashboardContainer = findViewById(R.id.dashboardContainer)
         eventsContainer = findViewById(R.id.eventsScrollContainer)
         eventsContent = findViewById(R.id.eventsContainer)
+        paymentsContainer = findViewById(R.id.paymentsScrollContainer)
+        paymentsContent = findViewById(R.id.paymentsContainer)
         communityFundsCard = findViewById(R.id.communityFundsCard)
         pollsContainer = findViewById(R.id.pollsScrollContainer)
         pollCreateControls = findViewById(R.id.pollCreateControls)
@@ -397,14 +478,22 @@ class MainActivity : AppCompatActivity() {
         tvWelcomeDetails = findViewById(R.id.tvWelcomeDetails)
         tvBalanceHero = findViewById(R.id.tvBalanceHero)
         tvBalanceHeroStatus = findViewById(R.id.tvBalanceHeroStatus)
+        btnOpenPayments = findViewById(R.id.btnOpenPayments)
+        announcementControls = findViewById(R.id.announcementControls)
+        announcementControlsPanel = findViewById(R.id.announcementControlsPanel)
+        btnToggleAnnouncementControls = findViewById(R.id.btnToggleAnnouncementControls)
+        etAnnouncementTitle = findViewById(R.id.etAnnouncementTitle)
+        etAnnouncementMessage = findViewById(R.id.etAnnouncementMessage)
+        btnCreateAnnouncement = findViewById(R.id.btnCreateAnnouncement)
         tvCommunityFunds = findViewById(R.id.tvCommunityFunds)
         btnEditCommunityFunds = findViewById(R.id.btnEditCommunityFunds)
-        btnLogout = findViewById(R.id.btnLogout)
         unreadEventsBanner = findViewById(R.id.unreadEventsBanner)
         tvUnreadEventsTitle = findViewById(R.id.tvUnreadEventsTitle)
         tvUnreadEventsSubtitle = findViewById(R.id.tvUnreadEventsSubtitle)
         btnMarkEventsRead = findViewById(R.id.btnMarkEventsRead)
         btnLoadMoreEvents = findViewById(R.id.btnLoadMoreEvents)
+        paymentTopBar = findViewById(R.id.paymentTopBar)
+        btnClosePayments = findViewById(R.id.btnClosePayments)
         appGateContainer = findViewById(R.id.appGateContainer)
         tvGateTitle = findViewById(R.id.tvGateTitle)
         tvGateMessage = findViewById(R.id.tvGateMessage)
@@ -445,12 +534,20 @@ class MainActivity : AppCompatActivity() {
         paymentConfigCard = findViewById(R.id.paymentConfigCard)
         paymentConfigPanel = findViewById(R.id.paymentConfigPanel)
         btnTogglePaymentConfig = findViewById(R.id.btnTogglePaymentConfig)
+        paymentTransferInfoCard = findViewById(R.id.paymentTransferInfoCard)
         etRecipientName = findViewById(R.id.etRecipientName)
         etRecipientPhone = findViewById(R.id.etRecipientPhone)
         etRecipientBank = findViewById(R.id.etRecipientBank)
+        etRecipientAccount = findViewById(R.id.etRecipientAccount)
+        etPaymentPurposeConfig = findViewById(R.id.etPaymentPurposeConfig)
+        etRecipientBik = findViewById(R.id.etRecipientBik)
+        etCorrespondentAccount = findViewById(R.id.etCorrespondentAccount)
+        etRecipientInn = findViewById(R.id.etRecipientInn)
+        etRecipientKpp = findViewById(R.id.etRecipientKpp)
         etSbpLink = findViewById(R.id.etSbpLink)
         btnSavePaymentConfig = findViewById(R.id.btnSavePaymentConfig)
         tvPaymentTransferInfo = findViewById(R.id.tvPaymentTransferInfo)
+        paymentDetailsContainer = findViewById(R.id.paymentDetailsContainer)
         btnOpenSbp = findViewById(R.id.btnOpenSbp)
         btnCopyPaymentDetails = findViewById(R.id.btnCopyPaymentDetails)
         rvEvents = findViewById(R.id.rvEvents)
@@ -573,6 +670,9 @@ class MainActivity : AppCompatActivity() {
                 if (chatLayoutManager.findFirstVisibleItemPosition() <= 3) {
                     loadOlderMessages()
                 }
+                if (chatContainer.visibility == View.VISIBLE && isChatNearBottom()) {
+                    markChatRead()
+                }
             }
         })
     }
@@ -582,18 +682,13 @@ class MainActivity : AppCompatActivity() {
         showEventsTab()
         tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) {
-                when (tab.position) {
-                    0 -> showEventsTab()
-                    1 -> showChatTab()
-                    2 -> showResidentsTab()
-                    3 -> showPollsTab()
-                    4 -> if (canSeeLogs()) showLogsTab() else showEventsTab()
-                    else -> showEventsTab()
-                }
+                openSectionForTab(tab.position)
             }
 
             override fun onTabUnselected(tab: TabLayout.Tab) = Unit
-            override fun onTabReselected(tab: TabLayout.Tab) = Unit
+            override fun onTabReselected(tab: TabLayout.Tab) {
+                openSectionForTab(tab.position)
+            }
         })
     }
 
@@ -605,6 +700,17 @@ class MainActivity : AppCompatActivity() {
         tabLayout.addTab(tabLayout.newTab().setText(R.string.polls_tab))
         if (includeLogs) {
             tabLayout.addTab(tabLayout.newTab().setText(R.string.logs_tab))
+        }
+    }
+
+    private fun openSectionForTab(position: Int) {
+        when (position) {
+            TAB_EVENTS -> showEventsTab()
+            TAB_CHAT -> showChatTab()
+            TAB_RESIDENTS -> showResidentsTab()
+            TAB_POLLS -> showPollsTab()
+            TAB_LOGS -> if (canSeeLogs()) showLogsTab() else showEventsTab()
+            else -> showEventsTab()
         }
     }
 
@@ -621,7 +727,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateResidentsTabBadge() {
         val count = pendingPaymentRequestsCount + pendingRegistrationRequestsCount
-        val tab = tabLayout.getTabAt(2) ?: return
+        val tab = tabLayout.getTabAt(TAB_RESIDENTS) ?: return
         if (count > 0 && canReviewPayments()) {
             val badge = tab.orCreateBadge
             badge.isVisible = true
@@ -634,7 +740,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateEventsTabBadge(count: Int) {
-        val tab = tabLayout.getTabAt(0) ?: return
+        val tab = tabLayout.getTabAt(TAB_EVENTS) ?: return
         if (count > 0) {
             val badge = tab.orCreateBadge
             badge.isVisible = true
@@ -647,7 +753,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateChatTabBadge(count: Int) {
-        val tab = tabLayout.getTabAt(1) ?: return
+        val tab = tabLayout.getTabAt(TAB_CHAT) ?: return
         if (count > 0) {
             val badge = tab.orCreateBadge
             badge.isVisible = true
@@ -660,7 +766,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updatePollsTabBadge(count: Int) {
-        val tab = tabLayout.getTabAt(3) ?: return
+        val tab = tabLayout.getTabAt(TAB_POLLS) ?: return
         if (count > 0) {
             val badge = tab.orCreateBadge
             badge.isVisible = true
@@ -676,7 +782,7 @@ class MainActivity : AppCompatActivity() {
         btnLogin.setOnClickListener { doLogin() }
         btnOpenRegistration.setOnClickListener { showRegistrationFormDialog() }
         btnOpenSettings.setOnClickListener { showSettingsDialog() }
-        btnLogout.setOnClickListener { doLogout() }
+        btnOpenPayments.setOnClickListener { showPaymentsTab() }
         btnAddUser.setOnClickListener { addUser() }
         btnCreateEvent.setOnClickListener { createEvent() }
         btnCreatePoll.setOnClickListener { createPoll() }
@@ -696,6 +802,7 @@ class MainActivity : AppCompatActivity() {
             currentEventsLimit += EVENTS_PAGE_SIZE
             currentUser?.let { attachRealtimeListeners(it) }
         }
+        btnClosePayments.setOnClickListener { closePaymentsScreen() }
         btnGatePrimary.setOnClickListener { gatePrimaryAction?.invoke() ?: onGatePrimaryAction() }
         btnGateSecondary.setOnClickListener { gateSecondaryAction?.invoke() ?: finishAffinity() }
         btnGateTertiary.setOnClickListener { gateTertiaryAction?.invoke() }
@@ -925,6 +1032,10 @@ class MainActivity : AppCompatActivity() {
         loginContainer.visibility = View.GONE
         dashboardContainer.visibility = View.VISIBLE
         btnOpenSettings.visibility = View.VISIBLE
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
+        lastSelectedTabBeforePayments = TAB_EVENTS
 
         val isAdmin = user.role == Role.ADMIN
         val isModerator = user.role == Role.MODERATOR
@@ -940,19 +1051,27 @@ class MainActivity : AppCompatActivity() {
             Role.USER -> getString(R.string.user_dashboard_title)
         }
         tvWelcome.text = user.fullName
-        tvWelcomeDetails.text = getString(R.string.your_plot, user.plotName)
+        tvWelcomeDetails.text = getString(R.string.your_plot, formatUserPlots(user))
         bindBalanceHero(user.balance)
-        arrangePaymentCard(user)
         adminControls.visibility = View.GONE
+        announcementControls.visibility = View.GONE
         eventControls.visibility = if (canCreateEvents) View.VISIBLE else View.GONE
         pollCreateControls.visibility = if (canCreatePolls) View.VISIBLE else View.GONE
+        announcementControlsPanel.visibility = View.GONE
         eventControlsPanel.visibility = View.GONE
         pollCreatePanel.visibility = View.GONE
         userPayControls.visibility = if (user.role == Role.USER || user.role == Role.MODERATOR) View.VISIBLE else View.GONE
         selectedChargeEvents = emptyList()
         updateSelectedChargeEventsUi()
+        communityFundsCard.visibility = View.VISIBLE
         paymentConfigCard.visibility = if (canReviewPayments(user)) View.VISIBLE else View.GONE
+        paymentTransferInfoCard.visibility = View.VISIBLE
         btnEditCommunityFunds.visibility = if (isAdmin) View.VISIBLE else View.GONE
+        rbEventInfo.visibility = View.VISIBLE
+        rbEventCharge.visibility = View.VISIBLE
+        rbEventExpense.visibility = View.VISIBLE
+        rbEventInfo.isChecked = true
+        updateEventForm()
         paymentRequestsHeader.visibility = if (canReviewPayments(user)) View.VISIBLE else View.GONE
         registrationRequestsHeader.visibility = if (canReviewPayments(user)) View.VISIBLE else View.GONE
         registrationRequestsPanel.visibility = View.GONE
@@ -960,6 +1079,7 @@ class MainActivity : AppCompatActivity() {
         adminFormContainer.visibility = View.GONE
         unreadEventsBanner.visibility = View.GONE
         isAdminPanelExpanded = false
+        isAnnouncementControlsExpanded = false
         isEventControlsExpanded = false
         isPollCreateExpanded = false
         isPaymentConfigExpanded = false
@@ -982,7 +1102,8 @@ class MainActivity : AppCompatActivity() {
         updateEventsTabBadge(0)
         renderPinnedMessage(null)
         clearReplyTarget()
-        tabLayout.getTabAt(0)?.select()
+        arrangePaymentContent()
+        tabLayout.getTabAt(TAB_EVENTS)?.select()
         lifecycleScope.launch {
             runCatching { registerDeviceForPush() }
         }
@@ -1003,18 +1124,23 @@ class MainActivity : AppCompatActivity() {
         attachRealtimeListeners(user)
     }
 
-    private fun arrangePaymentCard(user: RemoteUser) {
-        eventsContent.removeView(userPayControls)
-        val targetIndex = when (user.role) {
-            Role.MODERATOR -> eventsContent.indexOfChild(communityFundsCard) + 1
-            else -> eventsContent.indexOfChild(eventControls) + 1
-        }.coerceAtLeast(0)
-        eventsContent.addView(userPayControls, targetIndex)
+    private fun arrangePaymentContent() {
+        val paymentViews = listOf(
+            communityFundsCard,
+            userPayControls,
+            paymentConfigCard,
+            paymentTransferInfoCard
+        )
+        paymentViews.forEachIndexed { index, view ->
+            (view.parent as? ViewGroup)?.removeView(view)
+            paymentsContent.addView(view, index)
+        }
     }
 
     private fun resetUiState() {
         latestMessages.clear()
         olderMessages.clear()
+        pendingLocalMessages.clear()
         pinnedMessages = emptyList()
         currentPinnedMessageIndex = 0
         replyingToMessage = null
@@ -1059,6 +1185,16 @@ class MainActivity : AppCompatActivity() {
         if (::chatReplyPreviewContainer.isInitialized) {
             chatReplyPreviewContainer.visibility = View.GONE
         }
+        if (::summaryCard.isInitialized) {
+            summaryCard.visibility = View.VISIBLE
+        }
+        if (::paymentTopBar.isInitialized) {
+            paymentTopBar.visibility = View.GONE
+        }
+        if (::tabLayout.isInitialized) {
+            tabLayout.visibility = View.VISIBLE
+        }
+        lastSelectedTabBeforePayments = TAB_EVENTS
     }
 
     private fun attachRealtimeListeners(user: RemoteUser) {
@@ -1077,12 +1213,13 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     userAdapter.submitList(users)
                     allUsers = users
+                    chatAdapter.notifyDataSetChanged()
                     tvResidentsEmpty.visibility = if (users.isEmpty()) View.VISIBLE else View.GONE
                     currentUser?.let { active ->
                         val refreshedUser = users.firstOrNull { it.id == active.id } ?: active
                         currentUser = refreshedUser
                         tvWelcome.text = refreshedUser.fullName
-                        tvWelcomeDetails.text = getString(R.string.your_plot, refreshedUser.plotName)
+                        tvWelcomeDetails.text = getString(R.string.your_plot, formatUserPlots(refreshedUser))
                         bindBalanceHero(refreshedUser.balance)
                     }
                 }
@@ -1096,16 +1233,16 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     val visibleItems = events.filter { event ->
                         event.targetUserId.isBlank() ||
-                            event.targetUserId == user.id ||
-                            canReviewPayments(user)
+                            event.targetUserId == user.id
                     }
                     val visibleEvents = visibleItems.filter { it.type != EventType.POLL }
+                    val visiblePaymentEvents = visibleItems.filter { it.type == EventType.CHARGE || it.type == EventType.EXPENSE }
                     val visiblePolls = visibleItems.filter { it.type == EventType.POLL }
                     eventAdapter.submitList(visibleEvents)
                     pollAdapter.submitList(visiblePolls)
                     latestEvents = visibleEvents
                     latestPolls = visiblePolls
-                    availableChargeEvents = visibleItems
+                    availableChargeEvents = visiblePaymentEvents
                         .filter { it.type == EventType.CHARGE && it.amount > 0 && !it.isClosed }
                         .map { ChargeSuggestion(eventId = it.id, title = it.title, amount = it.amount) }
                     rvEvents.visibility = if (visibleEvents.isEmpty()) View.GONE else View.VISIBLE
@@ -1226,11 +1363,19 @@ class MainActivity : AppCompatActivity() {
                     val wasNearBottom = chatLayoutManager.findLastVisibleItemPosition() >= maxOf(chatAdapter.itemCount - 3, 0)
                     latestMessages.clear()
                     latestMessages.addAll(messages)
+                    val confirmedNonces = messages
+                        .filter { !it.isPendingLocal }
+                        .mapNotNull { it.clientNonce.takeIf(String::isNotBlank) }
+                        .toSet()
+                    pendingLocalMessages.removeAll { pending ->
+                        pending.clientNonce.isNotBlank() && pending.clientNonce in confirmedNonces
+                    }
                     updateChatList(scrollToBottom = wasNearBottom || olderMessages.isEmpty())
                     val mergedMessages = mergedChatMessages()
                     handleChatNotifications(user, mergedMessages)
                     if (chatContainer.visibility == View.VISIBLE) {
-                        markChatRead()
+                        markChatRead(mergedMessages)
+                        scheduleChatReadRefresh()
                     } else {
                         val unreadMessages = eventStateStore.unreadChatMessages(user.id, mergedMessages)
                         updateChatTabBadge(unreadMessages.size)
@@ -1267,7 +1412,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mergedChatMessages(): List<ChatMessage> {
-        return (olderMessages + latestMessages)
+        return (olderMessages + latestMessages + pendingLocalMessages)
             .distinctBy { it.id }
             .sortedBy { it.createdAtClient }
     }
@@ -1296,7 +1441,7 @@ class MainActivity : AppCompatActivity() {
         pinnedMessageCard.setOnClickListener {
             val index = chatAdapter.currentList.indexOfFirst { it.id == message.id }
             if (index >= 0) {
-                tabLayout.getTabAt(1)?.select()
+                tabLayout.getTabAt(TAB_CHAT)?.select()
                 rvChat.smoothScrollToPosition(index)
             }
             if (pinnedMessages.size > 1) {
@@ -1310,6 +1455,10 @@ class MainActivity : AppCompatActivity() {
         val latestTimestamp = messages.maxOfOrNull { it.createdAtClient } ?: return
         if (!hasInitializedChatNotifications) {
             hasInitializedChatNotifications = true
+            eventStateStore.setLastChatNotificationTimestamp(user.id, latestTimestamp)
+            return
+        }
+        if (EventNotificationHelper.isAppInForeground()) {
             eventStateStore.setLastChatNotificationTimestamp(user.id, latestTimestamp)
             return
         }
@@ -1346,6 +1495,15 @@ class MainActivity : AppCompatActivity() {
         unreadEvents: List<CommunityEvent>,
         unreadPolls: List<CommunityEvent>
     ) {
+        if (EventNotificationHelper.isAppInForeground()) {
+            unreadEvents.maxOfOrNull { it.createdAtClient }?.let {
+                eventStateStore.setLastBackgroundNotificationTimestamp(user.id, it)
+            }
+            unreadPolls.maxOfOrNull { it.createdAtClient }?.let {
+                eventStateStore.setLastPollNotificationTimestamp(user.id, it)
+            }
+            return
+        }
         if (pushBackendClient.isConfigured() && eventStateStore.isPushRegistrationConfirmed(user.id)) {
             return
         }
@@ -1573,6 +1731,16 @@ class MainActivity : AppCompatActivity() {
                         events = selectedChargeEvents,
                         purpose = purpose
                     )
+                    val staffIds = resolveStaffUserIds(excludedUserIds = listOf(user.id))
+                    if (staffIds.isNotEmpty()) {
+                        publishTargetedPush(
+                            userIds = staffIds,
+                            title = getString(R.string.push_payment_request_created_title),
+                            body = getString(R.string.push_payment_request_created_body, user.fullName, amount),
+                            destination = "residents",
+                            category = "payment_requests"
+                        )
+                    }
                 }
                 etPayAmount.text.clear()
                 etPayPurpose.text.clear()
@@ -1591,6 +1759,12 @@ class MainActivity : AppCompatActivity() {
             recipientName = etRecipientName.text.toString(),
             recipientPhone = etRecipientPhone.text.toString(),
             bankName = etRecipientBank.text.toString(),
+            accountNumber = etRecipientAccount.text.toString(),
+            paymentPurpose = etPaymentPurposeConfig.text.toString(),
+            bik = etRecipientBik.text.toString(),
+            correspondentAccount = etCorrespondentAccount.text.toString(),
+            recipientInn = etRecipientInn.text.toString(),
+            recipientKpp = etRecipientKpp.text.toString(),
             sbpLink = etSbpLink.text.toString()
         )
 
@@ -1609,18 +1783,20 @@ class MainActivity : AppCompatActivity() {
         etRecipientName.setText(config.recipientName)
         etRecipientPhone.setText(config.recipientPhone)
         etRecipientBank.setText(config.bankName)
+        etRecipientAccount.setText(config.accountNumber)
+        etPaymentPurposeConfig.setText(config.paymentPurpose)
+        etRecipientBik.setText(config.bik)
+        etCorrespondentAccount.setText(config.correspondentAccount)
+        etRecipientInn.setText(config.recipientInn)
+        etRecipientKpp.setText(config.recipientKpp)
         etSbpLink.setText(config.sbpLink)
 
         tvPaymentTransferInfo.text = if (config.isConfigured()) {
-            getString(
-                R.string.payment_transfer_info,
-                config.recipientName.ifBlank { getString(R.string.payment_config_not_set) },
-                config.recipientPhone.ifBlank { getString(R.string.payment_config_not_set) },
-                config.bankName.ifBlank { getString(R.string.payment_config_not_set) }
-            )
+            getString(R.string.payment_transfer_helper)
         } else {
             getString(R.string.payment_transfer_empty)
         }
+        renderPaymentDetailCards(config)
 
         btnOpenSbp.isEnabled = config.sbpLink.isNotBlank()
         btnCopyPaymentDetails.isEnabled = config.isConfigured()
@@ -1646,17 +1822,144 @@ class MainActivity : AppCompatActivity() {
             append(getString(R.string.payment_copy_block_title))
             append('\n')
             append(
-                getString(
-                    R.string.payment_transfer_info,
-                    currentPaymentConfig.recipientName.ifBlank { getString(R.string.payment_config_not_set) },
-                    currentPaymentConfig.recipientPhone.ifBlank { getString(R.string.payment_config_not_set) },
-                    currentPaymentConfig.bankName.ifBlank { getString(R.string.payment_config_not_set) }
-                )
+                buildPaymentDetailItems(currentPaymentConfig).joinToString("\n\n") { detail ->
+                    "${detail.label}\n${detail.copyValue}"
+                }
             )
         }
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.payment_copy_clip_label), text))
+        copyToClipboard(getString(R.string.payment_copy_clip_label), text)
         toast(getString(R.string.payment_details_copied))
+    }
+
+    private fun buildPaymentTransferDetails(config: PaymentTransferConfig): String {
+        if (!config.isConfigured()) {
+            return getString(R.string.payment_transfer_empty)
+        }
+        val fallback = getString(R.string.payment_config_not_set)
+        return buildString {
+            appendLine("Получатель")
+            appendLine(config.recipientName.ifBlank { fallback })
+            appendLine()
+            appendLine("Номер счета")
+            appendLine(config.accountNumber.ifBlank { fallback })
+            appendLine()
+            appendLine("Назначение платежа")
+            appendLine(config.paymentPurpose.ifBlank { fallback })
+            appendLine()
+            appendLine("БИК")
+            appendLine(config.bik.ifBlank { fallback })
+            appendLine()
+            appendLine("Банк-получатель")
+            appendLine(config.bankName.ifBlank { fallback })
+            appendLine()
+            appendLine("Корр. счет")
+            appendLine(config.correspondentAccount.ifBlank { fallback })
+            if (config.recipientInn.isNotBlank() || config.recipientKpp.isNotBlank()) {
+                appendLine()
+                appendLine("ИНН при необходимости")
+                appendLine(config.recipientInn.ifBlank { fallback })
+                appendLine()
+                appendLine("КПП при необходимости")
+                appendLine(config.recipientKpp.ifBlank { fallback })
+            }
+            if (config.recipientPhone.isNotBlank()) {
+                appendLine()
+                appendLine("Телефон")
+                appendLine(config.recipientPhone)
+            }
+            if (config.sbpLink.isNotBlank()) {
+                appendLine()
+                appendLine("Ссылка на оплату")
+                append(config.sbpLink)
+            }
+        }.trim()
+    }
+
+    private fun renderPaymentDetailCards(config: PaymentTransferConfig) {
+        paymentDetailsContainer.removeAllViews()
+        if (!config.isConfigured()) return
+
+        buildPaymentDetailItems(config).forEach { detail ->
+            val card = layoutInflater.inflate(
+                R.layout.item_payment_detail,
+                paymentDetailsContainer,
+                false
+            )
+            val tvLabel = card.findViewById<TextView>(R.id.tvPaymentDetailLabel)
+            val tvValue = card.findViewById<TextView>(R.id.tvPaymentDetailValue)
+            val btnCopy = card.findViewById<Button>(R.id.btnCopyPaymentField)
+            tvLabel.text = detail.label
+            tvValue.text = detail.value
+            val copyAction = {
+                copyToClipboard(detail.label, detail.copyValue)
+                toast(getString(R.string.payment_field_copied, detail.label))
+            }
+            card.setOnClickListener { copyAction() }
+            btnCopy.setOnClickListener { copyAction() }
+            paymentDetailsContainer.addView(card)
+        }
+    }
+
+    private fun buildPaymentDetailItems(config: PaymentTransferConfig): List<PaymentDetailItem> {
+        return buildList {
+            addPaymentDetail(getString(R.string.payment_config_recipient_hint), config.recipientName)
+            addPaymentDetail(
+                getString(R.string.payment_config_phone_hint),
+                formatPaymentPhoneForDisplay(config.recipientPhone),
+                config.recipientPhone.trim()
+            )
+            addPaymentDetail(getString(R.string.payment_config_bank_hint), config.bankName)
+            addPaymentDetail(
+                getString(R.string.payment_config_account_hint),
+                formatBankNumberForDisplay(config.accountNumber),
+                config.accountNumber.trim()
+            )
+            addPaymentDetail(getString(R.string.payment_config_purpose_hint), config.paymentPurpose)
+            addPaymentDetail(
+                getString(R.string.payment_config_bik_hint),
+                formatBankNumberForDisplay(config.bik, 3),
+                config.bik.trim()
+            )
+            addPaymentDetail(
+                getString(R.string.payment_config_correspondent_hint),
+                formatBankNumberForDisplay(config.correspondentAccount),
+                config.correspondentAccount.trim()
+            )
+            addPaymentDetail(getString(R.string.payment_config_inn_hint), config.recipientInn)
+            addPaymentDetail(getString(R.string.payment_config_kpp_hint), config.recipientKpp)
+            addPaymentDetail(getString(R.string.payment_config_sbp_hint), config.sbpLink)
+        }
+    }
+
+    private fun MutableList<PaymentDetailItem>.addPaymentDetail(
+        label: String,
+        displayValue: String,
+        copyValue: String = displayValue
+    ) {
+        if (copyValue.isBlank()) return
+        add(PaymentDetailItem(label = label, value = displayValue, copyValue = copyValue))
+    }
+
+    private fun formatPaymentPhoneForDisplay(raw: String): String {
+        val digits = raw.filter { it.isDigit() }
+        return if (digits.length == 10 || digits.length == 11) {
+            PhoneFormatUtils.formatRussianPhone(raw)
+        } else {
+            raw.trim()
+        }
+    }
+
+    private fun formatBankNumberForDisplay(raw: String, groupSize: Int = 4): String {
+        val trimmed = raw.trim()
+        val digitsOnly = trimmed.filter { it.isDigit() }
+        if (digitsOnly.isBlank()) return trimmed
+        if (digitsOnly.length != trimmed.length) return trimmed
+        return digitsOnly.chunked(groupSize).joinToString(" ")
+    }
+
+    private fun copyToClipboard(label: String, value: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
     }
 
     private fun confirmPaymentRequest(request: ManualPaymentRequest) {
@@ -1732,7 +2035,7 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Изменить баланс")
-            .setMessage("${user.fullName} (${user.plotName})")
+            .setMessage("${user.fullName} (${formatUserPlots(user)})")
             .setView(input)
             .setPositiveButton("Сохранить") { _, _ ->
                 val newBalance = input.text.toString().trim().toIntOrNull()
@@ -1869,21 +2172,49 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        val replyTarget = replyingToMessage
+        val clientNonce = UUID.randomUUID().toString()
+        val senderPlots = formatUserPlots(user)
+        val everyoneTag = "@${getString(R.string.chat_mentions_everyone)}"
+        val mentionedUsers = buildList {
+            addAll(selectedMentionedUsers.filter { text.contains("@${it.fullName}") })
+            if (text.contains(everyoneTag)) {
+                addAll(allUsers.filter { it.id != user.id })
+            }
+        }.distinctBy { it.id }
+
+        pendingLocalMessages.add(
+            ChatMessage(
+                id = "local-$clientNonce",
+                senderId = user.id,
+                senderName = user.fullName,
+                senderPlotName = senderPlots,
+                clientNonce = clientNonce,
+                text = text,
+                replyToMessageId = replyTarget?.id.orEmpty(),
+                replyToSenderName = replyTarget?.senderName.orEmpty(),
+                replyToSenderPlotName = replyTarget?.senderPlotName.orEmpty(),
+                replyToText = replyTarget?.text.orEmpty(),
+                mentionedUserIds = mentionedUsers.map { it.id },
+                createdAtClient = System.currentTimeMillis(),
+                isPendingLocal = true
+            )
+        )
+        etChatMessage.text.clear()
+        selectedMentionedUsers.clear()
+        everyoneMentionActive = false
+        clearReplyTarget()
+        updateChatList(scrollToBottom = true)
+
         lifecycleScope.launch {
             try {
-                val everyoneTag = "@${getString(R.string.chat_mentions_everyone)}"
-                val mentionedUsers = buildList {
-                    addAll(selectedMentionedUsers.filter { text.contains("@${it.fullName}") })
-                    if (text.contains(everyoneTag)) {
-                        addAll(allUsers.filter { it.id != user.id })
-                    }
-                }.distinctBy { it.id }
                 withContext(Dispatchers.IO) {
                     repository.sendChatMessage(
                         sender = user,
                         text = text,
-                        replyTo = replyingToMessage,
-                        mentionedUsers = mentionedUsers
+                        replyTo = replyTarget,
+                        mentionedUsers = mentionedUsers,
+                        clientNonce = clientNonce
                     )
                     publishBroadcastPush(
                         title = getString(R.string.chat_push_new_message_title),
@@ -1905,11 +2236,9 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                etChatMessage.text.clear()
-                selectedMentionedUsers.clear()
-                everyoneMentionActive = false
-                clearReplyTarget()
             } catch (_: Exception) {
+                pendingLocalMessages.removeAll { it.clientNonce == clientNonce }
+                updateChatList()
                 toast(getString(R.string.chat_send_failed))
             }
         }
@@ -1949,15 +2278,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEventsTab() {
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
         eventsContainer.visibility = View.VISIBLE
+        paymentsContainer.visibility = View.GONE
         chatContainer.visibility = View.GONE
         residentsContainer.visibility = View.GONE
         pollsContainer.visibility = View.GONE
         logsContainer.visibility = View.GONE
     }
 
-    private fun showPollsTab() {
+    private fun showPaymentsTab() {
+        if (tabLayout.visibility == View.VISIBLE) {
+            lastSelectedTabBeforePayments = tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: TAB_EVENTS
+        }
+        summaryCard.visibility = View.GONE
+        paymentTopBar.visibility = View.VISIBLE
+        tabLayout.visibility = View.GONE
         eventsContainer.visibility = View.GONE
+        paymentsContainer.visibility = View.VISIBLE
+        chatContainer.visibility = View.GONE
+        residentsContainer.visibility = View.GONE
+        pollsContainer.visibility = View.GONE
+        logsContainer.visibility = View.GONE
+        val paymentsScrollView = paymentsContainer as? NestedScrollView
+        paymentsScrollView?.post {
+            paymentsScrollView.scrollTo(0, 0)
+        }
+    }
+
+    private fun showPollsTab() {
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
+        eventsContainer.visibility = View.GONE
+        paymentsContainer.visibility = View.GONE
         chatContainer.visibility = View.GONE
         residentsContainer.visibility = View.GONE
         pollsContainer.visibility = View.VISIBLE
@@ -1966,7 +2322,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showResidentsTab() {
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
         eventsContainer.visibility = View.GONE
+        paymentsContainer.visibility = View.GONE
         chatContainer.visibility = View.GONE
         residentsContainer.visibility = View.VISIBLE
         pollsContainer.visibility = View.GONE
@@ -1974,20 +2334,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showChatTab() {
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
         eventsContainer.visibility = View.GONE
+        paymentsContainer.visibility = View.GONE
         residentsContainer.visibility = View.GONE
         pollsContainer.visibility = View.GONE
         logsContainer.visibility = View.GONE
         chatContainer.visibility = View.VISIBLE
         markChatRead()
+        scheduleChatReadRefresh()
     }
 
     private fun showLogsTab() {
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
         eventsContainer.visibility = View.GONE
+        paymentsContainer.visibility = View.GONE
         chatContainer.visibility = View.GONE
         residentsContainer.visibility = View.GONE
         pollsContainer.visibility = View.GONE
         logsContainer.visibility = View.VISIBLE
+    }
+
+    private fun closePaymentsScreen() {
+        summaryCard.visibility = View.VISIBLE
+        paymentTopBar.visibility = View.GONE
+        tabLayout.visibility = View.VISIBLE
+        openSectionForTab(lastSelectedTabBeforePayments)
+        tabLayout.getTabAt(lastSelectedTabBeforePayments)?.select()
+    }
+
+    private fun isPaymentsScreenOpen(): Boolean {
+        return paymentsContainer.visibility == View.VISIBLE && tabLayout.visibility != View.VISIBLE
     }
 
     private fun toggleAdminPanel(forceCollapse: Boolean = false) {
@@ -2321,15 +2702,21 @@ class MainActivity : AppCompatActivity() {
             toast(getString(R.string.chat_reply_deleted))
             return
         }
-        tabLayout.getTabAt(1)?.select()
+        tabLayout.getTabAt(TAB_CHAT)?.select()
         rvChat.post {
             rvChat.smoothScrollToPosition(targetIndex)
         }
     }
 
-    private fun markChatRead() {
+    private fun markChatRead(messages: List<ChatMessage> = chatAdapter.currentList) {
         val user = currentUser ?: return
-        val latestTimestamp = chatAdapter.currentList.maxOfOrNull { it.createdAtClient } ?: 0L
+        val latestTimestamp = messages
+            .filterNot { it.isPendingLocal }
+            .maxOfOrNull { it.createdAtClient } ?: 0L
+        val lastKnownReadAt = maxOf(
+            user.lastChatReadAt,
+            eventStateStore.getLastSeenChatTimestamp(user.id)
+        )
         if (latestTimestamp > 0L) {
             eventStateStore.setLastSeenChatTimestamp(user.id, latestTimestamp)
             eventStateStore.setLastChatNotificationTimestamp(
@@ -2338,11 +2725,26 @@ class MainActivity : AppCompatActivity() {
             )
         }
         updateChatTabBadge(0)
+        if (latestTimestamp <= 0L || latestTimestamp <= lastKnownReadAt) return
         lifecycleScope.launch {
             runCatching {
-                withContext(Dispatchers.IO) { repository.markChatRead(user.id) }
+                withContext(Dispatchers.IO) { repository.markChatRead(user.id, latestTimestamp) }
             }
         }
+    }
+
+    private fun scheduleChatReadRefresh() {
+        mainHandler.removeCallbacks(chatReadRetryFast)
+        mainHandler.removeCallbacks(chatReadRetrySlow)
+        mainHandler.postDelayed(chatReadRetryFast, CHAT_READ_RETRY_FAST_MS)
+        mainHandler.postDelayed(chatReadRetrySlow, CHAT_READ_RETRY_SLOW_MS)
+    }
+
+    private fun isChatNearBottom(): Boolean {
+        val totalItems = chatAdapter.itemCount
+        if (totalItems <= 0) return true
+        return chatLayoutManager.findLastCompletelyVisibleItemPosition() >= totalItems - 2 ||
+            chatLayoutManager.findLastVisibleItemPosition() >= totalItems - 1
     }
 
     private fun startReplyToMessage(message: ChatMessage) {
@@ -2357,7 +2759,7 @@ class MainActivity : AppCompatActivity() {
         tvReplyingToTitle.text = getString(R.string.chat_reply_to_prefix, formatSenderWithPlot(message.senderName, message.senderPlotName))
         tvReplyingToBody.text = message.text
         chatReplyPreviewContainer.visibility = View.VISIBLE
-        tabLayout.getTabAt(1)?.select()
+        tabLayout.getTabAt(TAB_CHAT)?.select()
         etChatMessage.requestFocus()
     }
 
@@ -2379,9 +2781,10 @@ class MainActivity : AppCompatActivity() {
                 buildString {
                     append("@")
                     append(it.fullName)
-                    if (it.plotName.isNotBlank()) {
+                    val plots = formatUserPlots(it)
+                    if (plots.isNotBlank()) {
                         append(" • ")
-                        append(it.plotName)
+                        append(plots)
                     }
                 }
             })
@@ -2459,9 +2862,15 @@ class MainActivity : AppCompatActivity() {
         val normalizedPlots = user.plots
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+            .map { plot ->
+                plot.removePrefix("Участок").trim()
+            }
         return when {
-            normalizedPlots.isNotEmpty() -> normalizedPlots.joinToString(", ")
-            user.plotName.isNotBlank() -> user.plotName.trim()
+            normalizedPlots.isNotEmpty() -> "Участок ${normalizedPlots.joinToString(", ")}"
+            user.plotName.isNotBlank() -> {
+                val singlePlot = user.plotName.trim().removePrefix("Участок").trim()
+                if (singlePlot.isBlank()) user.plotName.trim() else "Участок $singlePlot"
+            }
             else -> ""
         }
     }
@@ -2479,9 +2888,10 @@ class MainActivity : AppCompatActivity() {
         val labels = candidates.map {
             buildString {
                 append(it.fullName)
-                if (it.plotName.isNotBlank()) {
+                val plots = formatUserPlots(it)
+                if (plots.isNotBlank()) {
                     append(" • ")
-                    append(it.plotName)
+                    append(plots)
                 }
             }
         }.toTypedArray()
@@ -2529,7 +2939,9 @@ class MainActivity : AppCompatActivity() {
         val switchEvents = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsEvents)
         val switchPolls = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsPolls)
         val switchPayments = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsPayments)
+        val switchPaymentRequests = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsPaymentRequests)
         val switchRegistration = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsRegistration)
+        val switchRegistrationRequests = dialogView.findViewById<MaterialSwitch>(R.id.switchSettingsRegistrationRequests)
         val user = currentUser
         val userId = user?.id
         val isStaff = user?.role == Role.ADMIN || user?.role == Role.MODERATOR
@@ -2547,7 +2959,12 @@ class MainActivity : AppCompatActivity() {
             switchPolls.isChecked = eventStateStore.isPollNotificationsEnabled(userId)
             switchPayments.isChecked = eventStateStore.isPaymentNotificationsEnabled(userId)
             switchRegistration.isChecked = eventStateStore.isRegistrationNotificationsEnabled(userId)
-            switchRegistration.visibility = if (isStaff) View.VISIBLE else View.GONE
+            switchPaymentRequests.isChecked = eventStateStore.isPaymentRequestNotificationsEnabled(userId)
+            switchRegistrationRequests.isChecked = eventStateStore.isRegistrationRequestNotificationsEnabled(userId)
+            switchPayments.visibility = View.VISIBLE
+            switchPaymentRequests.visibility = if (isStaff) View.VISIBLE else View.GONE
+            switchRegistration.visibility = View.GONE
+            switchRegistrationRequests.visibility = if (isStaff) View.VISIBLE else View.GONE
         } else {
             listOf(
                 switchChatMessages,
@@ -2555,12 +2972,16 @@ class MainActivity : AppCompatActivity() {
                 switchEvents,
                 switchPolls,
                 switchPayments,
-                switchRegistration
+                switchPaymentRequests,
+                switchRegistration,
+                switchRegistrationRequests
             ).forEach { it.isEnabled = false }
+            switchPaymentRequests.visibility = View.GONE
             switchRegistration.visibility = View.GONE
+            switchRegistrationRequests.visibility = View.GONE
         }
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
             .setView(dialogView)
             .setPositiveButton(android.R.string.ok) { _, _ ->
@@ -2578,11 +2999,22 @@ class MainActivity : AppCompatActivity() {
                     eventStateStore.setPollNotificationsEnabled(it, switchPolls.isChecked)
                     eventStateStore.setPaymentNotificationsEnabled(it, switchPayments.isChecked)
                     eventStateStore.setRegistrationNotificationsEnabled(it, switchRegistration.isChecked)
+                    eventStateStore.setPaymentRequestNotificationsEnabled(it, switchPaymentRequests.isChecked)
+                    eventStateStore.setRegistrationRequestNotificationsEnabled(it, switchRegistrationRequests.isChecked)
                 }
                 toast(getString(R.string.settings_saved))
             }
+            .setNeutralButton(R.string.logout_button) { _, _ ->
+                doLogout()
+            }
             .setNegativeButton(R.string.dialog_cancel, null)
             .show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            ?.setTextColor(ContextCompat.getColor(this, R.color.primary_light))
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+            ?.setTextColor(ContextCompat.getColor(this, R.color.danger_light))
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+            ?.setTextColor(ContextCompat.getColor(this, R.color.on_surface_variant_light))
     }
 
     private fun applyThemeMode(mode: EventStateStore.ThemeMode) {
@@ -2676,7 +3108,7 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                withContext(Dispatchers.IO) {
+                val submission = withContext(Dispatchers.IO) {
                     repository.submitRegistrationRequest(
                         login = login.trim(),
                         password = password,
@@ -2684,6 +3116,19 @@ class MainActivity : AppCompatActivity() {
                         phone = "",
                         plots = plots
                     )
+                }
+                val registrationIdToken = submission.idToken
+                if (pushBackendClient.isConfigured() && !registrationIdToken.isNullOrBlank() && submission.staffUserIds.isNotEmpty()) {
+                    runCatching {
+                        pushBackendClient.publishToUsers(
+                            registrationIdToken,
+                            submission.staffUserIds,
+                            getString(R.string.push_registration_request_created_title),
+                            getString(R.string.push_registration_request_created_body, fullName.trim(), plots.joinToString(", ")),
+                            "residents",
+                            "registration_requests"
+                        )
+                    }
                 }
                 showRegistrationPendingDialog()
             } catch (error: Exception) {
@@ -2763,7 +3208,7 @@ class MainActivity : AppCompatActivity() {
 
                 lifecycleScope.launch {
                     try {
-                        withContext(Dispatchers.IO) {
+                        val submission = withContext(Dispatchers.IO) {
                             repository.submitRegistrationRequest(
                                 login = email,
                                 password = password,
@@ -2771,6 +3216,23 @@ class MainActivity : AppCompatActivity() {
                                 phone = phone,
                                 plots = selectedPlots.toList()
                             )
+                        }
+                        val registrationIdToken = submission.idToken
+                        if (pushBackendClient.isConfigured() && !registrationIdToken.isNullOrBlank() && submission.staffUserIds.isNotEmpty()) {
+                            runCatching {
+                                pushBackendClient.publishToUsers(
+                                    registrationIdToken,
+                                    submission.staffUserIds,
+                                    getString(R.string.push_registration_request_created_title),
+                                    getString(
+                                        R.string.push_registration_request_created_body,
+                                        displayName,
+                                        selectedPlots.joinToString(", ")
+                                    ),
+                                    "residents",
+                                    "registration_requests"
+                                )
+                            }
                         }
                         dialog.dismiss()
                         showRegistrationPendingDialog()
@@ -2784,8 +3246,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isValidPhone(phone: String): Boolean {
-        val digits = phone.filter { it.isDigit() }
-        return digits.length in 10..15
+        return PhoneFormatUtils.isValidRussianPhoneInput(phone)
     }
 
     private fun humanReadableRegistrationError(error: Throwable): String {
@@ -2910,11 +3371,25 @@ class MainActivity : AppCompatActivity() {
         val destination = pendingNotificationDestination ?: return
         if (dashboardContainer.visibility != View.VISIBLE) return
         when (destination) {
-            "chat" -> tabLayout.getTabAt(1)?.select()
-            "polls" -> tabLayout.getTabAt(3)?.select()
-            else -> tabLayout.getTabAt(0)?.select()
+            "chat" -> tabLayout.getTabAt(TAB_CHAT)?.select()
+            "payments" -> showPaymentsTab()
+            "residents" -> tabLayout.getTabAt(TAB_RESIDENTS)?.select()
+            "polls" -> tabLayout.getTabAt(TAB_POLLS)?.select()
+            else -> tabLayout.getTabAt(TAB_EVENTS)?.select()
         }
         pendingNotificationDestination = null
+    }
+
+    private suspend fun resolveStaffUserIds(excludedUserIds: List<String> = emptyList()): List<String> {
+        val ids = if (allUsers.isNotEmpty()) {
+            allUsers
+                .filter { it.role == Role.ADMIN || it.role == Role.MODERATOR }
+                .map { it.id }
+        } else {
+            repository.getStaffUserIds()
+        }
+        val excluded = excludedUserIds.toSet()
+        return ids.filterNot { excluded.contains(it) }.distinct()
     }
 
     private suspend fun registerDeviceForPush() {
@@ -3005,8 +3480,16 @@ class MainActivity : AppCompatActivity() {
         }
 
     companion object {
+        private const val CONNECTIVITY_WATCHDOG_MS = 5_000L
+        private const val CHAT_READ_RETRY_FAST_MS = 350L
+        private const val CHAT_READ_RETRY_SLOW_MS = 1_200L
         private const val CHAT_PAGE_SIZE = 30
         private const val EVENTS_PAGE_SIZE = 20
+        private const val TAB_EVENTS = 0
+        private const val TAB_CHAT = 1
+        private const val TAB_RESIDENTS = 2
+        private const val TAB_POLLS = 3
+        private const val TAB_LOGS = 4
         private val EVENT_TEMPLATES = listOf(
             EventTemplate(
                 name = "Покос травы",
