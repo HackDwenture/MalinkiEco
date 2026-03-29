@@ -1216,7 +1216,12 @@ class MainActivity : AppCompatActivity() {
                     chatAdapter.notifyDataSetChanged()
                     tvResidentsEmpty.visibility = if (users.isEmpty()) View.VISIBLE else View.GONE
                     currentUser?.let { active ->
-                        val refreshedUser = users.firstOrNull { it.id == active.id } ?: active
+                        val refreshedUser = users.firstOrNull { it.id == active.id }
+                        if (refreshedUser == null) {
+                            doLogout()
+                            toast("Ваш аккаунт был удален. Войдите под другими данными.")
+                            return@runOnUiThread
+                        }
                         currentUser = refreshedUser
                         tvWelcome.text = refreshedUser.fullName
                         tvWelcomeDetails.text = getString(R.string.your_plot, formatUserPlots(refreshedUser))
@@ -2154,14 +2159,32 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        lifecycleScope.launch {
-            try {
-                withContext(Dispatchers.IO) { repository.deleteUser(user, actor) }
-                toast(getString(R.string.user_deleted))
-            } catch (_: Exception) {
-                toast(getString(R.string.user_delete_failed))
+        AlertDialog.Builder(this)
+            .setTitle("Удалить собственника")
+            .setMessage("${user.fullName} (${formatUserPlots(user)}) будет удален из списка собственников.")
+            .setPositiveButton("Продолжить") { _, _ ->
+                confirmDeleteUser(user, actor)
             }
-        }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
+    }
+
+    private fun confirmDeleteUser(user: RemoteUser, actor: RemoteUser) {
+        AlertDialog.Builder(this)
+            .setTitle("Подтвердите удаление")
+            .setMessage("Пользователь сразу потеряет доступ к приложению. Вход по этим данным больше не будет работать. Действие нельзя отменить.")
+            .setPositiveButton("Удалить") { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { repository.deleteUser(user, actor) }
+                        toast(getString(R.string.user_deleted))
+                    } catch (_: Exception) {
+                        toast(getString(R.string.user_delete_failed))
+                    }
+                }
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
     }
 
     private fun sendMessage() {
