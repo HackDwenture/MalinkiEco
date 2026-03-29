@@ -39,7 +39,6 @@ class ChatAdapter(
     inner class ChatViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val card: MaterialCardView = itemView.findViewById(R.id.cardMessage)
         private val sender: TextView = itemView.findViewById(R.id.tvSenderName)
-        private val plot: TextView = itemView.findViewById(R.id.tvSenderPlot)
         private val pinnedBadge: TextView = itemView.findViewById(R.id.tvPinnedBadge)
         private val mentionBadge: TextView = itemView.findViewById(R.id.tvMentionBadge)
         private val replyContainer: View = itemView.findViewById(R.id.replyPreviewContainer)
@@ -51,9 +50,7 @@ class ChatAdapter(
 
         fun bind(item: ChatMessage) {
             val currentUserId = currentUserIdProvider()
-            sender.text = item.senderName
-            plot.text = item.senderPlotName
-            plot.visibility = if (item.senderPlotName.isBlank()) View.GONE else View.VISIBLE
+            sender.text = formatReplySender(item.senderName, item.senderPlotName)
             message.text = item.text
             val editedSuffix = if (item.updatedAtClient > item.createdAtClient) {
                 itemView.context.getString(R.string.chat_message_edited_suffix)
@@ -101,10 +98,29 @@ class ChatAdapter(
 
             status.visibility = if (isMine) View.VISIBLE else View.GONE
             if (isMine) {
-                status.text = if (readerCutoffProvider() >= item.createdAtClient) {
-                    itemView.context.getString(R.string.chat_status_read)
-                } else {
-                    itemView.context.getString(R.string.chat_status_sent)
+                val context = itemView.context
+                when {
+                    item.isPendingLocal -> {
+                        status.text = "\u25F7"
+                        status.setTextColor(ContextCompat.getColor(context, R.color.on_surface_variant_light))
+                    }
+                    readerCutoffProvider() >= item.createdAtClient -> {
+                        status.text = "\u2713\u2713"
+                        status.setTextColor(ContextCompat.getColor(context, R.color.primary_light))
+                    }
+                    else -> {
+                        status.text = "\u2713"
+                        status.setTextColor(ContextCompat.getColor(context, R.color.on_surface_variant_light))
+                    }
+                }
+                status.contentDescription = when {
+                    item.isPendingLocal -> "Отправляется"
+                    readerCutoffProvider() >= item.createdAtClient -> {
+                        itemView.context.getString(R.string.chat_status_read)
+                    }
+                    else -> {
+                        itemView.context.getString(R.string.chat_status_sent)
+                    }
                 }
                 card.setOnLongClickListener {
                     showMessageActions(item)

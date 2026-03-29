@@ -12,6 +12,8 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -79,6 +81,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -276,6 +279,7 @@ class MainActivity : AppCompatActivity() {
 
     private val latestMessages = mutableListOf<ChatMessage>()
     private val olderMessages = mutableListOf<ChatMessage>()
+    private val pendingLocalMessages = mutableListOf<ChatMessage>()
     private var pinnedMessages = emptyList<ChatMessage>()
     private var currentPinnedMessageIndex = 0
     private var replyingToMessage: ChatMessage? = null
@@ -294,6 +298,25 @@ class MainActivity : AppCompatActivity() {
     private var pendingNotificationDestination: String? = null
     private var suppressMentionPicker = false
     private var lastSelectedTabBeforePayments = TAB_EVENTS
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val connectivityWatchdog = object : Runnable {
+        override fun run() {
+            if (!hasInternetConnection()) {
+                checkStartupRequirements()
+            }
+            mainHandler.postDelayed(this, CONNECTIVITY_WATCHDOG_MS)
+        }
+    }
+    private val chatReadRetryFast = Runnable {
+        if (::chatContainer.isInitialized && chatContainer.visibility == View.VISIBLE) {
+            markChatRead()
+        }
+    }
+    private val chatReadRetrySlow = Runnable {
+        if (::chatContainer.isInitialized && chatContainer.visibility == View.VISIBLE) {
+            markChatRead()
+        }
+    }
 
     private val chatMentionWatcher = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -386,6 +409,8 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         EventNotificationHelper.setAppInForeground(true)
         EventNotificationHelper.cancelAll(this)
+        mainHandler.removeCallbacks(connectivityWatchdog)
+        mainHandler.postDelayed(connectivityWatchdog, CONNECTIVITY_WATCHDOG_MS)
         checkStartupRequirements()
         if (currentUser != null && pushBackendClient.isConfigured()) {
             lifecycleScope.launch {
@@ -396,6 +421,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         EventNotificationHelper.setAppInForeground(false)
+        mainHandler.removeCallbacks(connectivityWatchdog)
+        mainHandler.removeCallbacks(chatReadRetryFast)
+        mainHandler.removeCallbacks(chatReadRetrySlow)
         super.onPause()
     }
 
@@ -407,6 +435,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(connectivityWatchdog)
+        mainHandler.removeCallbacks(chatReadRetryFast)
+        mainHandler.removeCallbacks(chatReadRetrySlow)
         usersListener?.remove()
         chatListener?.remove()
         eventsListener?.remove()
@@ -638,6 +669,9 @@ class MainActivity : AppCompatActivity() {
                 super.onScrolled(recyclerView, dx, dy)
                 if (chatLayoutManager.findFirstVisibleItemPosition() <= 3) {
                     loadOlderMessages()
+                }
+                if (chatContainer.visibility == View.VISIBLE && isChatNearBottom()) {
+                    markChatRead()
                 }
             }
         })
@@ -1017,7 +1051,7 @@ class MainActivity : AppCompatActivity() {
             Role.USER -> getString(R.string.user_dashboard_title)
         }
         tvWelcome.text = user.fullName
-        tvWelcomeDetails.text = getString(R.string.your_plot, user.plotName)
+        tvWelcomeDetails.text = getString(R.string.your_plot, formatUserPlots(user))
         bindBalanceHero(user.balance)
         adminControls.visibility = View.GONE
         announcementControls.visibility = View.GONE
@@ -1106,6 +1140,7 @@ class MainActivity : AppCompatActivity() {
     private fun resetUiState() {
         latestMessages.clear()
         olderMessages.clear()
+        pendingLocalMessages.clear()
         pinnedMessages = emptyList()
         currentPinnedMessageIndex = 0
         replyingToMessage = null
@@ -1178,12 +1213,13 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     userAdapter.submitList(users)
                     allUsers = users
+                    chatAdapter.notifyDataSetChanged()
                     tvResidentsEmpty.visibility = if (users.isEmpty()) View.VISIBLE else View.GONE
                     currentUser?.let { active ->
                         val refreshedUser = users.firstOrNull { it.id == active.id } ?: active
                         currentUser = refreshedUser
                         tvWelcome.text = refreshedUser.fullName
-                        tvWelcomeDetails.text = getString(R.string.your_plot, refreshedUser.plotName)
+                        tvWelcomeDetails.text = getString(R.string.your_plot, formatUserPlots(refreshedUser))
                         bindBalanceHero(refreshedUser.balance)
                     }
                 }
@@ -1197,8 +1233,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     val visibleItems = events.filter { event ->
                         event.targetUserId.isBlank() ||
-                            event.targetUserId == user.id ||
-                            canReviewPayments(user)
+                            event.targetUserId == user.id
                     }
                     val visibleEvents = visibleItems.filter { it.type != EventType.POLL }
                     val visiblePaymentEvents = visibleItems.filter { it.type == EventType.CHARGE || it.type == EventType.EXPENSE }
@@ -1328,11 +1363,19 @@ class MainActivity : AppCompatActivity() {
                     val wasNearBottom = chatLayoutManager.findLastVisibleItemPosition() >= maxOf(chatAdapter.itemCount - 3, 0)
                     latestMessages.clear()
                     latestMessages.addAll(messages)
+                    val confirmedNonces = messages
+                        .filter { !it.isPendingLocal }
+                        .mapNotNull { it.clientNonce.takeIf(String::isNotBlank) }
+                        .toSet()
+                    pendingLocalMessages.removeAll { pending ->
+                        pending.clientNonce.isNotBlank() && pending.clientNonce in confirmedNonces
+                    }
                     updateChatList(scrollToBottom = wasNearBottom || olderMessages.isEmpty())
                     val mergedMessages = mergedChatMessages()
                     handleChatNotifications(user, mergedMessages)
                     if (chatContainer.visibility == View.VISIBLE) {
-                        markChatRead()
+                        markChatRead(mergedMessages)
+                        scheduleChatReadRefresh()
                     } else {
                         val unreadMessages = eventStateStore.unreadChatMessages(user.id, mergedMessages)
                         updateChatTabBadge(unreadMessages.size)
@@ -1369,7 +1412,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mergedChatMessages(): List<ChatMessage> {
-        return (olderMessages + latestMessages)
+        return (olderMessages + latestMessages + pendingLocalMessages)
             .distinctBy { it.id }
             .sortedBy { it.createdAtClient }
     }
@@ -1992,7 +2035,7 @@ class MainActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("Изменить баланс")
-            .setMessage("${user.fullName} (${user.plotName})")
+            .setMessage("${user.fullName} (${formatUserPlots(user)})")
             .setView(input)
             .setPositiveButton("Сохранить") { _, _ ->
                 val newBalance = input.text.toString().trim().toIntOrNull()
@@ -2129,21 +2172,49 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        val replyTarget = replyingToMessage
+        val clientNonce = UUID.randomUUID().toString()
+        val senderPlots = formatUserPlots(user)
+        val everyoneTag = "@${getString(R.string.chat_mentions_everyone)}"
+        val mentionedUsers = buildList {
+            addAll(selectedMentionedUsers.filter { text.contains("@${it.fullName}") })
+            if (text.contains(everyoneTag)) {
+                addAll(allUsers.filter { it.id != user.id })
+            }
+        }.distinctBy { it.id }
+
+        pendingLocalMessages.add(
+            ChatMessage(
+                id = "local-$clientNonce",
+                senderId = user.id,
+                senderName = user.fullName,
+                senderPlotName = senderPlots,
+                clientNonce = clientNonce,
+                text = text,
+                replyToMessageId = replyTarget?.id.orEmpty(),
+                replyToSenderName = replyTarget?.senderName.orEmpty(),
+                replyToSenderPlotName = replyTarget?.senderPlotName.orEmpty(),
+                replyToText = replyTarget?.text.orEmpty(),
+                mentionedUserIds = mentionedUsers.map { it.id },
+                createdAtClient = System.currentTimeMillis(),
+                isPendingLocal = true
+            )
+        )
+        etChatMessage.text.clear()
+        selectedMentionedUsers.clear()
+        everyoneMentionActive = false
+        clearReplyTarget()
+        updateChatList(scrollToBottom = true)
+
         lifecycleScope.launch {
             try {
-                val everyoneTag = "@${getString(R.string.chat_mentions_everyone)}"
-                val mentionedUsers = buildList {
-                    addAll(selectedMentionedUsers.filter { text.contains("@${it.fullName}") })
-                    if (text.contains(everyoneTag)) {
-                        addAll(allUsers.filter { it.id != user.id })
-                    }
-                }.distinctBy { it.id }
                 withContext(Dispatchers.IO) {
                     repository.sendChatMessage(
                         sender = user,
                         text = text,
-                        replyTo = replyingToMessage,
-                        mentionedUsers = mentionedUsers
+                        replyTo = replyTarget,
+                        mentionedUsers = mentionedUsers,
+                        clientNonce = clientNonce
                     )
                     publishBroadcastPush(
                         title = getString(R.string.chat_push_new_message_title),
@@ -2165,11 +2236,9 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                 }
-                etChatMessage.text.clear()
-                selectedMentionedUsers.clear()
-                everyoneMentionActive = false
-                clearReplyTarget()
             } catch (_: Exception) {
+                pendingLocalMessages.removeAll { it.clientNonce == clientNonce }
+                updateChatList()
                 toast(getString(R.string.chat_send_failed))
             }
         }
@@ -2275,6 +2344,7 @@ class MainActivity : AppCompatActivity() {
         logsContainer.visibility = View.GONE
         chatContainer.visibility = View.VISIBLE
         markChatRead()
+        scheduleChatReadRefresh()
     }
 
     private fun showLogsTab() {
@@ -2638,9 +2708,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun markChatRead() {
+    private fun markChatRead(messages: List<ChatMessage> = chatAdapter.currentList) {
         val user = currentUser ?: return
-        val latestTimestamp = chatAdapter.currentList.maxOfOrNull { it.createdAtClient } ?: 0L
+        val latestTimestamp = messages
+            .filterNot { it.isPendingLocal }
+            .maxOfOrNull { it.createdAtClient } ?: 0L
+        val lastKnownReadAt = maxOf(
+            user.lastChatReadAt,
+            eventStateStore.getLastSeenChatTimestamp(user.id)
+        )
         if (latestTimestamp > 0L) {
             eventStateStore.setLastSeenChatTimestamp(user.id, latestTimestamp)
             eventStateStore.setLastChatNotificationTimestamp(
@@ -2649,11 +2725,26 @@ class MainActivity : AppCompatActivity() {
             )
         }
         updateChatTabBadge(0)
+        if (latestTimestamp <= 0L || latestTimestamp <= lastKnownReadAt) return
         lifecycleScope.launch {
             runCatching {
-                withContext(Dispatchers.IO) { repository.markChatRead(user.id) }
+                withContext(Dispatchers.IO) { repository.markChatRead(user.id, latestTimestamp) }
             }
         }
+    }
+
+    private fun scheduleChatReadRefresh() {
+        mainHandler.removeCallbacks(chatReadRetryFast)
+        mainHandler.removeCallbacks(chatReadRetrySlow)
+        mainHandler.postDelayed(chatReadRetryFast, CHAT_READ_RETRY_FAST_MS)
+        mainHandler.postDelayed(chatReadRetrySlow, CHAT_READ_RETRY_SLOW_MS)
+    }
+
+    private fun isChatNearBottom(): Boolean {
+        val totalItems = chatAdapter.itemCount
+        if (totalItems <= 0) return true
+        return chatLayoutManager.findLastCompletelyVisibleItemPosition() >= totalItems - 2 ||
+            chatLayoutManager.findLastVisibleItemPosition() >= totalItems - 1
     }
 
     private fun startReplyToMessage(message: ChatMessage) {
@@ -2690,9 +2781,10 @@ class MainActivity : AppCompatActivity() {
                 buildString {
                     append("@")
                     append(it.fullName)
-                    if (it.plotName.isNotBlank()) {
+                    val plots = formatUserPlots(it)
+                    if (plots.isNotBlank()) {
                         append(" • ")
-                        append(it.plotName)
+                        append(plots)
                     }
                 }
             })
@@ -2770,9 +2862,15 @@ class MainActivity : AppCompatActivity() {
         val normalizedPlots = user.plots
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+            .map { plot ->
+                plot.removePrefix("Участок").trim()
+            }
         return when {
-            normalizedPlots.isNotEmpty() -> normalizedPlots.joinToString(", ")
-            user.plotName.isNotBlank() -> user.plotName.trim()
+            normalizedPlots.isNotEmpty() -> "Участок ${normalizedPlots.joinToString(", ")}"
+            user.plotName.isNotBlank() -> {
+                val singlePlot = user.plotName.trim().removePrefix("Участок").trim()
+                if (singlePlot.isBlank()) user.plotName.trim() else "Участок $singlePlot"
+            }
             else -> ""
         }
     }
@@ -2790,9 +2888,10 @@ class MainActivity : AppCompatActivity() {
         val labels = candidates.map {
             buildString {
                 append(it.fullName)
-                if (it.plotName.isNotBlank()) {
+                val plots = formatUserPlots(it)
+                if (plots.isNotBlank()) {
                     append(" • ")
-                    append(it.plotName)
+                    append(plots)
                 }
             }
         }.toTypedArray()
@@ -3381,6 +3480,9 @@ class MainActivity : AppCompatActivity() {
         }
 
     companion object {
+        private const val CONNECTIVITY_WATCHDOG_MS = 5_000L
+        private const val CHAT_READ_RETRY_FAST_MS = 350L
+        private const val CHAT_READ_RETRY_SLOW_MS = 1_200L
         private const val CHAT_PAGE_SIZE = 30
         private const val EVENTS_PAGE_SIZE = 20
         private const val TAB_EVENTS = 0
