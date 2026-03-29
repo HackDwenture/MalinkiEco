@@ -5,6 +5,7 @@ data class ChatMessage(
     val senderId: String,
     val senderName: String,
     val senderPlotName: String = "",
+    val clientNonce: String = "",
     val text: String,
     val replyToMessageId: String = "",
     val replyToSenderName: String = "",
@@ -16,5 +17,6 @@ data class ChatMessage(
     val pinnedByUserName: String = "",
     val pinnedAtClient: Long = 0L,
     val createdAtClient: Long,
-    val updatedAtClient: Long = 0L
+    val updatedAtClient: Long = 0L,
+    val isPendingLocal: Boolean = false
 )

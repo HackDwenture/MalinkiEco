@@ -7,6 +7,7 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -14,6 +15,7 @@ import com.example.malinkieco.R
 import com.example.malinkieco.data.RemoteUser
 import com.example.malinkieco.data.Role
 import com.example.malinkieco.util.PhoneFormatUtils
+import com.google.android.material.card.MaterialCardView
 
 class UserListAdapter(
     private val currentUserIdProvider: () -> String?,
@@ -35,6 +37,7 @@ class UserListAdapter(
     }
 
     inner class UserViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val card: MaterialCardView = itemView as MaterialCardView
         private val title: TextView = itemView.findViewById(R.id.tvUserTitle)
         private val email: TextView = itemView.findViewById(R.id.tvUserEmail)
         private val phone: TextView = itemView.findViewById(R.id.tvUserPhone)
@@ -49,7 +52,7 @@ class UserListAdapter(
         private val demoteButton: Button = itemView.findViewById(R.id.btnDemoteModerator)
 
         fun bind(user: RemoteUser) {
-            title.text = "${user.plotName}  ${user.fullName}"
+            title.text = "${formatPlots(user)}  ${user.fullName}"
             email.text = user.email
             email.visibility = if (canManageUsers) View.VISIBLE else View.GONE
             phone.text = if (user.phone.isBlank()) "" else itemView.context.getString(
@@ -60,6 +63,7 @@ class UserListAdapter(
             role.text = roleLabel(user.role)
             balance.text = itemView.context.getString(R.string.balance_format, user.balance)
             status.text = balanceStatus(user.balance)
+            bindCardStyle(user.balance)
 
             balanceActionsRow.visibility = if (canManageUsers) View.VISIBLE else View.GONE
 
@@ -76,6 +80,20 @@ class UserListAdapter(
             demoteButton.setOnClickListener { onDemoteModerator(user) }
         }
 
+        private fun bindCardStyle(balance: Int) {
+            val context = itemView.context
+            val backgroundColor = ContextCompat.getColor(
+                context,
+                when {
+                    balance < 0 -> R.color.summary_debt_light
+                    balance > 0 -> R.color.summary_overpaid_light
+                    else -> R.color.summary_clear_light
+                }
+            )
+            card.setCardBackgroundColor(backgroundColor)
+            status.backgroundTintList = android.content.res.ColorStateList.valueOf(backgroundColor)
+        }
+
         private fun balanceStatus(balance: Int): String {
             return when {
                 balance > 0 -> itemView.context.getString(R.string.status_overpaid)
@@ -89,6 +107,21 @@ class UserListAdapter(
                 Role.ADMIN -> itemView.context.getString(R.string.role_admin)
                 Role.MODERATOR -> itemView.context.getString(R.string.role_moderator)
                 Role.USER -> itemView.context.getString(R.string.role_user)
+            }
+        }
+
+        private fun formatPlots(user: RemoteUser): String {
+            val normalizedPlots = user.plots
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { it.removePrefix("Участок").trim() }
+            return when {
+                normalizedPlots.isNotEmpty() -> "Участок ${normalizedPlots.joinToString(", ")}"
+                user.plotName.isNotBlank() -> {
+                    val singlePlot = user.plotName.trim().removePrefix("Участок").trim()
+                    if (singlePlot.isBlank()) user.plotName.trim() else "Участок $singlePlot"
+                }
+                else -> ""
             }
         }
     }

@@ -645,7 +645,8 @@ class FirebaseRepository(
         sender: RemoteUser,
         text: String,
         replyTo: ChatMessage? = null,
-        mentionedUsers: List<RemoteUser> = emptyList()
+        mentionedUsers: List<RemoteUser> = emptyList(),
+        clientNonce: String = ""
     ) {
         val message = text.trim()
         if (message.isEmpty()) return
@@ -658,6 +659,7 @@ class FirebaseRepository(
                 "senderId" to sender.id,
                 "senderName" to sender.fullName,
                 "senderPlotName" to senderPlots,
+                "clientNonce" to clientNonce.trim(),
                 "text" to message,
                 "replyToMessageId" to replyTo?.id.orEmpty(),
                 "replyToSenderName" to replyTo?.senderName.orEmpty(),
@@ -706,8 +708,8 @@ class FirebaseRepository(
         ).await()
     }
 
-    suspend fun markChatRead(userId: String) {
-        users.document(userId).update("lastChatReadAt", System.currentTimeMillis()).await()
+    suspend fun markChatRead(userId: String, readAt: Long) {
+        users.document(userId).update("lastChatReadAt", readAt).await()
     }
 
     suspend fun createEvent(
@@ -1025,7 +1027,7 @@ class FirebaseRepository(
 
     suspend fun getRecentEventsForUser(user: RemoteUser, limit: Long): List<CommunityEvent> {
         return getRecentEvents(limit).filter { event ->
-            event.targetUserId.isBlank() || event.targetUserId == user.id || user.role == Role.ADMIN || user.role == Role.MODERATOR
+            event.targetUserId.isBlank() || event.targetUserId == user.id
         }
     }
 
@@ -1168,6 +1170,7 @@ class FirebaseRepository(
             senderId = senderId,
             senderName = senderName,
             senderPlotName = getString("senderPlotName").orEmpty(),
+            clientNonce = getString("clientNonce").orEmpty(),
             text = text,
             replyToMessageId = getString("replyToMessageId").orEmpty(),
             replyToSenderName = getString("replyToSenderName").orEmpty(),
@@ -1179,7 +1182,8 @@ class FirebaseRepository(
             pinnedByUserName = getString("pinnedByUserName").orEmpty(),
             pinnedAtClient = getLong("pinnedAtClient") ?: 0L,
             createdAtClient = createdAtClient,
-            updatedAtClient = getLong("updatedAtClient") ?: 0L
+            updatedAtClient = getLong("updatedAtClient") ?: 0L,
+            isPendingLocal = metadata.hasPendingWrites()
         )
     }
 
