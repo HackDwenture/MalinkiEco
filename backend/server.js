@@ -138,9 +138,11 @@ app.post("/api/notifications/publish", authenticateFirebaseUser, async (req, res
             text: [
               "Здравствуйте!",
               "",
+              `Тема: ${title}`,
+              "",
               body,
               "",
-              "Это уведомление отправлено из MalinkiEco."
+              "Рекомендуем открыть MalinkiEco, чтобы ознакомиться с деталями события и актуальной информацией."
             ].join("\n")
           })
         )
