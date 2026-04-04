@@ -728,7 +728,6 @@ async function collectTokens({ audience, targetUserIds, excludedUserIds }) {
 
 async function collectRecipientEmails({ audience, targetUserIds, excludedUserIds }) {
   const snapshot = await users.get();
-  const excludeSet = new Set(excludedUserIds);
   const targetSet = new Set(targetUserIds);
 
   return [...new Set(
@@ -736,7 +735,7 @@ async function collectRecipientEmails({ audience, targetUserIds, excludedUserIds
       .map((doc) => ({ id: doc.id, ...doc.data() }))
       .filter((user) => {
         if (audience === "broadcast") {
-          return !excludeSet.has(user.id);
+          return true;
         }
         return targetSet.has(user.id);
       })
