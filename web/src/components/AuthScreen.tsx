@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react'
+import { SiteFooter } from './SiteFooter'
 import type { AuthFormState, AuthMode } from '../types'
 
 type AuthScreenProps = {
@@ -215,6 +216,8 @@ export function AuthScreen({
           </div>
         </div>
       </section>
+
+      <SiteFooter />
     </div>
   )
 }

@@ -1,3 +1,5 @@
+import { SiteFooter } from './SiteFooter'
+
 export function SplashScreen({ message }: { message: string }) {
   return (
     <div className="shell">
@@ -8,6 +10,7 @@ export function SplashScreen({ message }: { message: string }) {
         </div>
         <h1>{message}</h1>
       </section>
+      <SiteFooter />
     </div>
   )
 }
