@@ -4,6 +4,7 @@ import express from "express";
 import admin from "firebase-admin";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -13,7 +14,15 @@ const {
   YOOKASSA_SHOP_ID,
   YOOKASSA_SECRET_KEY,
   FIREBASE_SERVICE_ACCOUNT_PATH,
-  FIREBASE_SERVICE_ACCOUNT_JSON
+  FIREBASE_SERVICE_ACCOUNT_JSON,
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_SECURE,
+  SMTP_USER,
+  SMTP_PASS,
+  SMTP_FROM,
+  RESEND_API_KEY,
+  RESEND_FROM
 } = process.env;
 
 const isYooKassaConfigured = Boolean(PUBLIC_BASE_URL && YOOKASSA_SHOP_ID && YOOKASSA_SECRET_KEY);
@@ -35,6 +44,57 @@ const users = firestore.collection("users");
 const payments = firestore.collection("payments");
 const paymentOrders = firestore.collection("payment_orders");
 const userDevices = firestore.collection("user_devices");
+const emailVerifications = firestore.collection("email_verifications");
+
+const resendFrom = String(RESEND_FROM || SMTP_FROM || "").trim();
+const isResendConfigured = Boolean(RESEND_API_KEY && resendFrom);
+const isEmailVerificationConfigured = Boolean(SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS && SMTP_FROM);
+const emailTransport = isEmailVerificationConfigured
+  ? nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: Number(SMTP_PORT),
+      secure: String(SMTP_SECURE || "false").toLowerCase() === "true",
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS
+      }
+    })
+  : null;
+
+async function sendEmail({ to, subject, text }) {
+  if (isResendConfigured) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: resendFrom,
+        to: [to],
+        subject,
+        text
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Resend request failed: ${response.status} ${await response.text()}`);
+    }
+
+    return;
+  }
+
+  if (!emailTransport) {
+    throw new Error("Email verification is not configured");
+  }
+
+  await emailTransport.sendMail({
+    from: SMTP_FROM,
+    to,
+    subject,
+    text
+  });
+}
 
 const app = express();
 app.use(cors());
@@ -42,6 +102,236 @@ app.use(express.json());
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.post("/api/email-verification/request", async (req, res) => {
+  try {
+    if (!isResendConfigured && !emailTransport) {
+      return res.status(503).json({ error: "Email verification is not configured" });
+    }
+
+    const email = normalizeRegistrationEmail(req.body?.email);
+    if (!email) {
+      return res.status(400).json({ error: "Укажите действующий адрес электронной почты" });
+    }
+
+    const docId = verificationDocId(email);
+    const verificationRef = emailVerifications.doc(docId);
+    const snapshot = await verificationRef.get();
+    const previous = snapshot.data() || {};
+    const now = Date.now();
+    const lastSentAt = Number(previous.lastSentAt ?? 0);
+
+    if (lastSentAt > 0 && now - lastSentAt < 60_000) {
+      return res.status(429).json({ error: "Повторно отправить код можно через минуту" });
+    }
+
+    const code = generateVerificationCode();
+    await verificationRef.set(
+      {
+        email,
+        codeHash: hashText(code),
+        attempts: 0,
+        lastSentAt: now,
+        expiresAt: now + 10 * 60_000,
+        verifiedAt: 0,
+        registerTokenHash: "",
+        registerTokenExpiresAt: 0,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    if (isResendConfigured) {
+      await sendEmail({
+        to: email,
+        subject: "Код подтверждения MalinkiEco",
+        text: [
+          "Здравствуйте!",
+          "",
+          "Ваш код подтверждения для регистрации в MalinkiEco:",
+          code,
+          "",
+          "Код действует 10 минут.",
+          "Если вы не запрашивали регистрацию, просто проигнорируйте это письмо."
+        ].join("\n")
+      });
+
+      return res.json({ ok: true, expiresInSeconds: 600 });
+    }
+
+    await emailTransport.sendMail({
+      from: SMTP_FROM,
+      to: email,
+      subject: "Код подтверждения MalinkiEco",
+      text: [
+        "Здравствуйте!",
+        "",
+        "Ваш код подтверждения для регистрации в MalinkiEco:",
+        code,
+        "",
+        "Код действует 10 минут.",
+        "Если вы не запрашивали регистрацию, просто проигнорируйте это письмо."
+      ].join("\n")
+    });
+
+    return res.json({ ok: true, expiresInSeconds: 600 });
+  } catch (error) {
+    console.error("[email-verification] request failed", error);
+    return res.status(500).json({ error: error.message || "Internal error" });
+  }
+});
+
+app.post("/api/email-verification/verify", async (req, res) => {
+  try {
+    const email = normalizeRegistrationEmail(req.body?.email);
+    const code = String(req.body?.code || "").trim();
+
+    if (!email) {
+      return res.status(400).json({ error: "Укажите действующий адрес электронной почты" });
+    }
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: "Код подтверждения должен содержать 6 цифр" });
+    }
+
+    const verificationRef = emailVerifications.doc(verificationDocId(email));
+    const snapshot = await verificationRef.get();
+    if (!snapshot.exists) {
+      return res.status(404).json({ error: "Сначала запросите код подтверждения" });
+    }
+
+    const data = snapshot.data() || {};
+    const now = Date.now();
+    if (Number(data.expiresAt ?? 0) < now) {
+      return res.status(400).json({ error: "Срок действия кода истек. Запросите новый код" });
+    }
+
+    const attempts = Number(data.attempts ?? 0) + 1;
+    if (attempts > 10) {
+      await verificationRef.set({ attempts }, { merge: true });
+      return res.status(429).json({ error: "Слишком много попыток. Запросите новый код" });
+    }
+
+    if (hashText(code) !== String(data.codeHash || "")) {
+      await verificationRef.set({ attempts }, { merge: true });
+      return res.status(400).json({ error: "Неверный код подтверждения" });
+    }
+
+    const registerToken = crypto.randomBytes(24).toString("hex");
+    await verificationRef.set(
+      {
+        attempts,
+        verifiedAt: now,
+        registerTokenHash: hashText(registerToken),
+        registerTokenExpiresAt: now + 30 * 60_000,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    return res.json({ ok: true, registerToken });
+  } catch (error) {
+    console.error("[email-verification] verify failed", error);
+    return res.status(500).json({ error: error.message || "Internal error" });
+  }
+});
+
+app.post("/api/email-verification/register", async (req, res) => {
+  try {
+    const email = normalizeRegistrationEmail(req.body?.email);
+    const password = String(req.body?.password || "");
+    const fullName = String(req.body?.fullName || "").trim();
+    const phone = normalizeRussianPhone(String(req.body?.phone || ""));
+    const login = String(req.body?.login || "").trim() || email;
+    const plots = normalizePlots(req.body?.plots);
+    const registerToken = String(req.body?.registerToken || "").trim();
+
+    if (!email) {
+      return res.status(400).json({ error: "Укажите действующий адрес электронной почты" });
+    }
+    if (password.trim().length < 6) {
+      return res.status(400).json({ error: "Пароль должен быть не короче 6 символов" });
+    }
+    if (!fullName) {
+      return res.status(400).json({ error: "Введите отображаемое имя" });
+    }
+    if (!isValidRussianPhone(phone)) {
+      return res.status(400).json({ error: "Номер телефона должен содержать 10 цифр после 8" });
+    }
+    if (plots.length === 0) {
+      return res.status(400).json({ error: "Укажите хотя бы один участок" });
+    }
+    if (!registerToken) {
+      return res.status(400).json({ error: "Сначала подтвердите код из письма" });
+    }
+
+    const verificationRef = emailVerifications.doc(verificationDocId(email));
+    const verificationSnapshot = await verificationRef.get();
+    if (!verificationSnapshot.exists) {
+      return res.status(400).json({ error: "Сначала подтвердите код из письма" });
+    }
+
+    const verificationData = verificationSnapshot.data() || {};
+    const now = Date.now();
+    if (Number(verificationData.registerTokenExpiresAt ?? 0) < now) {
+      return res.status(400).json({ error: "Подтверждение почты устарело. Запросите новый код" });
+    }
+    if (hashText(registerToken) !== String(verificationData.registerTokenHash || "")) {
+      return res.status(400).json({ error: "Подтверждение почты недействительно. Запросите новый код" });
+    }
+
+    let existingUser = null;
+    try {
+      existingUser = await admin.auth().getUserByEmail(email);
+    } catch (error) {
+      if (error.code !== "auth/user-not-found") {
+        throw error;
+      }
+    }
+
+    if (existingUser) {
+      const userDoc = await users.doc(existingUser.uid).get();
+      const registrationDoc = await firestore.collection("registration_requests").doc(existingUser.uid).get();
+
+      if (userDoc.exists) {
+        return res.status(409).json({ error: "Такой пользователь уже зарегистрирован" });
+      }
+      if (registrationDoc.exists && String(registrationDoc.data()?.status || "") === "PENDING") {
+        return res.status(409).json({ error: "Заявка уже передана модераторам" });
+      }
+      if (registrationDoc.exists && String(registrationDoc.data()?.status || "") === "REJECTED") {
+        await admin.auth().deleteUser(existingUser.uid);
+      } else {
+        return res.status(409).json({ error: "Такой пользователь уже существует" });
+      }
+    }
+
+    const createdUser = await admin.auth().createUser({
+      email,
+      password,
+      displayName: fullName
+    });
+
+    await firestore.collection("registration_requests").doc(createdUser.uid).set({
+      login,
+      authEmail: email,
+      fullName,
+      phone,
+      plots,
+      status: "PENDING",
+      reviewedByName: "",
+      reviewReason: "",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAtClient: Date.now()
+    });
+
+    await verificationRef.delete();
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[email-verification] register failed", error);
+    return res.status(500).json({ error: error.message || "Internal error" });
+  }
 });
 
 app.post("/api/notifications/register-device", authenticateFirebaseUser, async (req, res) => {
@@ -412,4 +702,52 @@ async function cleanupInvalidTokens(tokens, responses) {
   }).filter(Boolean);
 
   await Promise.all(deletePromises);
+}
+
+function verificationDocId(email) {
+  return crypto.createHash("sha256").update(email).digest("hex");
+}
+
+function hashText(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function generateVerificationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function normalizeRegistrationEmail(value) {
+  const email = String(value || "").trim().toLowerCase();
+  if (!email || !email.includes("@")) return "";
+  return email;
+}
+
+function normalizePlots(rawValue) {
+  if (Array.isArray(rawValue)) {
+    return rawValue.map(String).map(cleanPlotValue).filter(Boolean);
+  }
+  return String(rawValue || "")
+    .split(",")
+    .map(cleanPlotValue)
+    .filter(Boolean);
+}
+
+function cleanPlotValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^участок\s*/i, "")
+    .trim();
+}
+
+function normalizeRussianPhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 10) return `8${digits}`;
+  if (digits.length === 11 && (digits.startsWith("8") || digits.startsWith("7"))) {
+    return `8${digits.slice(1)}`;
+  }
+  return digits;
+}
+
+function isValidRussianPhone(value) {
+  return /^8\d{10}$/.test(String(value || ""));
 }
