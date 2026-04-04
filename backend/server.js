@@ -10,13 +10,22 @@ dotenv.config();
 const {
   PORT = "8080",
   PUBLIC_BASE_URL,
-  YOOKASSA_SHOP_ID,
-  YOOKASSA_SECRET_KEY,
+  PAYMENT_PROVIDER_SHOP_ID,
+  PAYMENT_PROVIDER_SECRET_KEY,
+  PAYMENT_PROVIDER_PAYMENTS_URL,
   FIREBASE_SERVICE_ACCOUNT_PATH,
   FIREBASE_SERVICE_ACCOUNT_JSON
 } = process.env;
 
-const isYooKassaConfigured = Boolean(PUBLIC_BASE_URL && YOOKASSA_SHOP_ID && YOOKASSA_SECRET_KEY);
+const paymentProviderShopId = String(PAYMENT_PROVIDER_SHOP_ID || "").trim();
+const paymentProviderSecretKey = String(PAYMENT_PROVIDER_SECRET_KEY || "").trim();
+const paymentProviderPaymentsUrl = String(PAYMENT_PROVIDER_PAYMENTS_URL || "").trim();
+const isPaymentGatewayConfigured = Boolean(
+  PUBLIC_BASE_URL &&
+  paymentProviderShopId &&
+  paymentProviderSecretKey &&
+  paymentProviderPaymentsUrl
+);
 
 const serviceAccount = FIREBASE_SERVICE_ACCOUNT_JSON
   ? JSON.parse(FIREBASE_SERVICE_ACCOUNT_JSON)
@@ -190,8 +199,8 @@ app.post("/api/notifications/publish", authenticateFirebaseUser, async (req, res
 
 app.post("/api/payments/create", authenticateFirebaseUser, async (req, res) => {
   try {
-    if (!isYooKassaConfigured) {
-      return res.status(503).json({ error: "YooKassa backend is not configured" });
+    if (!isPaymentGatewayConfigured) {
+      return res.status(503).json({ error: "Payments backend is not configured" });
     }
     const amount = Number(req.body?.amount || 0);
     const userId = String(req.body?.userId || "");
@@ -211,10 +220,10 @@ app.post("/api/payments/create", authenticateFirebaseUser, async (req, res) => {
 
     const orderId = crypto.randomUUID();
     const returnUrl = `${PUBLIC_BASE_URL.replace(/\/$/, "")}/return?orderId=${orderId}`;
-    const paymentResponse = await fetch("https://api.yookassa.ru/v3/payments", {
+    const paymentResponse = await fetch(paymentProviderPaymentsUrl, {
       method: "POST",
       headers: {
-        Authorization: `Basic ${Buffer.from(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`).toString("base64")}`,
+        Authorization: `Basic ${Buffer.from(`${paymentProviderShopId}:${paymentProviderSecretKey}`).toString("base64")}`,
         "Content-Type": "application/json",
         "Idempotence-Key": orderId
       },
@@ -238,14 +247,14 @@ app.post("/api/payments/create", authenticateFirebaseUser, async (req, res) => {
 
     const paymentData = await paymentResponse.json();
     if (!paymentResponse.ok) {
-      return res.status(502).json({ error: paymentData.description || "YooKassa create payment failed" });
+      return res.status(502).json({ error: paymentData.description || "Payment provider create payment failed" });
     }
 
     await paymentOrders.doc(orderId).set({
       userId,
       amount,
       status: "PENDING",
-      yookassaPaymentId: paymentData.id,
+      providerPaymentId: paymentData.id,
       confirmationUrl: paymentData.confirmation?.confirmation_url || "",
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       createdAtClient: Date.now()
@@ -263,8 +272,8 @@ app.post("/api/payments/create", authenticateFirebaseUser, async (req, res) => {
 
 app.get("/api/payments/:orderId", authenticateFirebaseUser, async (req, res) => {
   try {
-    if (!isYooKassaConfigured) {
-      return res.status(503).json({ error: "YooKassa backend is not configured" });
+    if (!isPaymentGatewayConfigured) {
+      return res.status(503).json({ error: "Payments backend is not configured" });
     }
     const orderSnapshot = await paymentOrders.doc(req.params.orderId).get();
     if (!orderSnapshot.exists) {
@@ -287,10 +296,10 @@ app.get("/api/payments/:orderId", authenticateFirebaseUser, async (req, res) => 
   }
 });
 
-app.post("/api/yookassa/webhook", async (req, res) => {
+app.post("/api/payments/webhook", async (req, res) => {
   try {
-    if (!isYooKassaConfigured) {
-      return res.status(503).json({ error: "YooKassa backend is not configured" });
+    if (!isPaymentGatewayConfigured) {
+      return res.status(503).json({ error: "Payments backend is not configured" });
     }
     const eventName = req.body?.event;
     const paymentObject = req.body?.object;
@@ -329,14 +338,14 @@ app.post("/api/yookassa/webhook", async (req, res) => {
         transaction.update(orderRef, {
           status: "SUCCEEDED",
           paidAt: admin.firestore.FieldValue.serverTimestamp(),
-          yookassaPaymentStatus: paymentObject?.status || "succeeded"
+          providerPaymentStatus: paymentObject?.status || "succeeded"
         });
         transaction.set(payments.doc(), {
           userId,
           amount,
-          note: `YooKassa payment ${orderId}`,
+          note: `Online payment ${orderId}`,
           orderId,
-          provider: "YOOKASSA",
+          provider: "ONLINE",
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           createdAtClient: Date.now()
         });
@@ -346,7 +355,7 @@ app.post("/api/yookassa/webhook", async (req, res) => {
         {
           status: "CANCELED",
           canceledAt: admin.firestore.FieldValue.serverTimestamp(),
-          yookassaPaymentStatus: paymentObject?.status || "canceled"
+          providerPaymentStatus: paymentObject?.status || "canceled"
         },
         { merge: true }
       );
@@ -359,8 +368,8 @@ app.post("/api/yookassa/webhook", async (req, res) => {
 });
 
 app.get("/return", (req, res) => {
-  if (!isYooKassaConfigured) {
-    return res.status(503).send("YooKassa backend is not configured");
+  if (!isPaymentGatewayConfigured) {
+    return res.status(503).send("Payments backend is not configured");
   }
   const orderId = String(req.query.orderId || "");
   const deepLink = `malinkieco://payments/return?orderId=${encodeURIComponent(orderId)}`;
@@ -390,7 +399,7 @@ app.get("/return", (req, res) => {
 });
 
 app.listen(Number(PORT), () => {
-  console.log(`YooKassa backend listening on port ${PORT}`);
+  console.log(`Payments backend listening on port ${PORT}`);
 });
 
 async function authenticateFirebaseUser(req, res, next) {
