@@ -1,4 +1,4 @@
-import cors from "cors";
+﻿import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import admin from "firebase-admin";
@@ -121,7 +121,7 @@ app.post("/api/email-verification/request", async (req, res) => {
 
     const email = normalizeRegistrationEmail(req.body?.email);
     if (!email) {
-      return res.status(400).json({ error: "Укажите действующий адрес электронной почты" });
+      return res.status(400).json({ error: "РЈРєР°Р¶РёС‚Рµ РґРµР№СЃС‚РІСѓСЋС‰РёР№ Р°РґСЂРµСЃ СЌР»РµРєС‚СЂРѕРЅРЅРѕР№ РїРѕС‡С‚С‹" });
     }
 
     const docId = verificationDocId(email);
@@ -132,7 +132,7 @@ app.post("/api/email-verification/request", async (req, res) => {
     const lastSentAt = Number(previous.lastSentAt ?? 0);
 
     if (lastSentAt > 0 && now - lastSentAt < 60_000) {
-      return res.status(429).json({ error: "Повторно отправить код можно через минуту" });
+      return res.status(429).json({ error: "РџРѕРІС‚РѕСЂРЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ РєРѕРґ РјРѕР¶РЅРѕ С‡РµСЂРµР· РјРёРЅСѓС‚Сѓ" });
     }
 
     const code = generateVerificationCode();
@@ -154,7 +154,7 @@ app.post("/api/email-verification/request", async (req, res) => {
     if (isResendConfigured) {
       await sendEmail({
         to: email,
-        subject: "Код подтверждения MalinkiEco",
+        subject: "РљРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ MalinkiEco",
         text: [
           "Здравствуйте!",
           "",
@@ -172,16 +172,16 @@ app.post("/api/email-verification/request", async (req, res) => {
     await emailTransport.sendMail({
       from: SMTP_FROM,
       to: email,
-      subject: "Код подтверждения MalinkiEco",
+      subject: "РљРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ MalinkiEco",
       text: [
-        "Здравствуйте!",
-        "",
-        "Ваш код подтверждения для регистрации в MalinkiEco:",
-        code,
-        "",
-        "Код действует 10 минут.",
-        "Если вы не запрашивали регистрацию, просто проигнорируйте это письмо."
-      ].join("\n")
+              "Здравствуйте!",
+              "",
+              `Тема: ${title}`,
+              "",
+              body,
+              "",
+              "Рекомендуем открыть MalinkiEco, чтобы ознакомиться с деталями события и актуальной информацией."
+            ].join("\n")
     });
 
     return res.json({ ok: true, expiresInSeconds: 600 });
@@ -197,33 +197,33 @@ app.post("/api/email-verification/verify", async (req, res) => {
     const code = String(req.body?.code || "").trim();
 
     if (!email) {
-      return res.status(400).json({ error: "Укажите действующий адрес электронной почты" });
+      return res.status(400).json({ error: "РЈРєР°Р¶РёС‚Рµ РґРµР№СЃС‚РІСѓСЋС‰РёР№ Р°РґСЂРµСЃ СЌР»РµРєС‚СЂРѕРЅРЅРѕР№ РїРѕС‡С‚С‹" });
     }
     if (!/^\d{6}$/.test(code)) {
-      return res.status(400).json({ error: "Код подтверждения должен содержать 6 цифр" });
+      return res.status(400).json({ error: "РљРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ РґРѕР»Р¶РµРЅ СЃРѕРґРµСЂР¶Р°С‚СЊ 6 С†РёС„СЂ" });
     }
 
     const verificationRef = emailVerifications.doc(verificationDocId(email));
     const snapshot = await verificationRef.get();
     if (!snapshot.exists) {
-      return res.status(404).json({ error: "Сначала запросите код подтверждения" });
+      return res.status(404).json({ error: "РЎРЅР°С‡Р°Р»Р° Р·Р°РїСЂРѕСЃРёС‚Рµ РєРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ" });
     }
 
     const data = snapshot.data() || {};
     const now = Date.now();
     if (Number(data.expiresAt ?? 0) < now) {
-      return res.status(400).json({ error: "Срок действия кода истек. Запросите новый код" });
+      return res.status(400).json({ error: "РЎСЂРѕРє РґРµР№СЃС‚РІРёСЏ РєРѕРґР° РёСЃС‚РµРє. Р—Р°РїСЂРѕСЃРёС‚Рµ РЅРѕРІС‹Р№ РєРѕРґ" });
     }
 
     const attempts = Number(data.attempts ?? 0) + 1;
     if (attempts > 10) {
       await verificationRef.set({ attempts }, { merge: true });
-      return res.status(429).json({ error: "Слишком много попыток. Запросите новый код" });
+      return res.status(429).json({ error: "РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ РїРѕРїС‹С‚РѕРє. Р—Р°РїСЂРѕСЃРёС‚Рµ РЅРѕРІС‹Р№ РєРѕРґ" });
     }
 
     if (hashText(code) !== String(data.codeHash || "")) {
       await verificationRef.set({ attempts }, { merge: true });
-      return res.status(400).json({ error: "Неверный код подтверждения" });
+      return res.status(400).json({ error: "РќРµРІРµСЂРЅС‹Р№ РєРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ" });
     }
 
     const registerToken = crypto.randomBytes(24).toString("hex");
@@ -256,37 +256,37 @@ app.post("/api/email-verification/register", async (req, res) => {
     const registerToken = String(req.body?.registerToken || "").trim();
 
     if (!email) {
-      return res.status(400).json({ error: "Укажите действующий адрес электронной почты" });
+      return res.status(400).json({ error: "РЈРєР°Р¶РёС‚Рµ РґРµР№СЃС‚РІСѓСЋС‰РёР№ Р°РґСЂРµСЃ СЌР»РµРєС‚СЂРѕРЅРЅРѕР№ РїРѕС‡С‚С‹" });
     }
     if (password.trim().length < 6) {
-      return res.status(400).json({ error: "Пароль должен быть не короче 6 символов" });
+      return res.status(400).json({ error: "РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РєРѕСЂРѕС‡Рµ 6 СЃРёРјРІРѕР»РѕРІ" });
     }
     if (!fullName) {
-      return res.status(400).json({ error: "Введите отображаемое имя" });
+      return res.status(400).json({ error: "Р’РІРµРґРёС‚Рµ РѕС‚РѕР±СЂР°Р¶Р°РµРјРѕРµ РёРјСЏ" });
     }
     if (!isValidRussianPhone(phone)) {
-      return res.status(400).json({ error: "Номер телефона должен содержать 10 цифр после 8" });
+      return res.status(400).json({ error: "РќРѕРјРµСЂ С‚РµР»РµС„РѕРЅР° РґРѕР»Р¶РµРЅ СЃРѕРґРµСЂР¶Р°С‚СЊ 10 С†РёС„СЂ РїРѕСЃР»Рµ 8" });
     }
     if (plots.length === 0) {
-      return res.status(400).json({ error: "Укажите хотя бы один участок" });
+      return res.status(400).json({ error: "РЈРєР°Р¶РёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ СѓС‡Р°СЃС‚РѕРє" });
     }
     if (!registerToken) {
-      return res.status(400).json({ error: "Сначала подтвердите код из письма" });
+      return res.status(400).json({ error: "РЎРЅР°С‡Р°Р»Р° РїРѕРґС‚РІРµСЂРґРёС‚Рµ РєРѕРґ РёР· РїРёСЃСЊРјР°" });
     }
 
     const verificationRef = emailVerifications.doc(verificationDocId(email));
     const verificationSnapshot = await verificationRef.get();
     if (!verificationSnapshot.exists) {
-      return res.status(400).json({ error: "Сначала подтвердите код из письма" });
+      return res.status(400).json({ error: "РЎРЅР°С‡Р°Р»Р° РїРѕРґС‚РІРµСЂРґРёС‚Рµ РєРѕРґ РёР· РїРёСЃСЊРјР°" });
     }
 
     const verificationData = verificationSnapshot.data() || {};
     const now = Date.now();
     if (Number(verificationData.registerTokenExpiresAt ?? 0) < now) {
-      return res.status(400).json({ error: "Подтверждение почты устарело. Запросите новый код" });
+      return res.status(400).json({ error: "РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РїРѕС‡С‚С‹ СѓСЃС‚Р°СЂРµР»Рѕ. Р—Р°РїСЂРѕСЃРёС‚Рµ РЅРѕРІС‹Р№ РєРѕРґ" });
     }
     if (hashText(registerToken) !== String(verificationData.registerTokenHash || "")) {
-      return res.status(400).json({ error: "Подтверждение почты недействительно. Запросите новый код" });
+      return res.status(400).json({ error: "РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РїРѕС‡С‚С‹ РЅРµРґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ. Р—Р°РїСЂРѕСЃРёС‚Рµ РЅРѕРІС‹Р№ РєРѕРґ" });
     }
 
     let existingUser = null;
@@ -303,15 +303,15 @@ app.post("/api/email-verification/register", async (req, res) => {
       const registrationDoc = await firestore.collection("registration_requests").doc(existingUser.uid).get();
 
       if (userDoc.exists) {
-        return res.status(409).json({ error: "Такой пользователь уже зарегистрирован" });
+        return res.status(409).json({ error: "РўР°РєРѕР№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓР¶Рµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅ" });
       }
       if (registrationDoc.exists && String(registrationDoc.data()?.status || "") === "PENDING") {
-        return res.status(409).json({ error: "Заявка уже передана модераторам" });
+        return res.status(409).json({ error: "Р—Р°СЏРІРєР° СѓР¶Рµ РїРµСЂРµРґР°РЅР° РјРѕРґРµСЂР°С‚РѕСЂР°Рј" });
       }
       if (registrationDoc.exists && String(registrationDoc.data()?.status || "") === "REJECTED") {
         await admin.auth().deleteUser(existingUser.uid);
       } else {
-        return res.status(409).json({ error: "Такой пользователь уже существует" });
+        return res.status(409).json({ error: "РўР°РєРѕР№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚" });
       }
     }
 
@@ -428,9 +428,11 @@ app.post("/api/notifications/publish", authenticateFirebaseUser, async (req, res
             text: [
               "Здравствуйте!",
               "",
+              `Тема: ${title}`,
+              "",
               body,
               "",
-              "Это уведомление отправлено из MalinkiEco."
+              "Рекомендуем открыть MalinkiEco, чтобы ознакомиться с деталями события и актуальной информацией."
             ].join("\n")
           })
         )
@@ -527,7 +529,7 @@ app.post("/api/payments/create", authenticateFirebaseUser, async (req, res) => {
           type: "redirect",
           return_url: returnUrl
         },
-        description: `Оплата в MalinkiEco для ${userName || userId}`,
+        description: `РћРїР»Р°С‚Р° РІ MalinkiEco РґР»СЏ ${userName || userId}`,
         metadata: {
           orderId,
           userId
@@ -669,7 +671,7 @@ app.get("/return", (req, res) => {
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>Возврат в приложение</title>
+      <title>Р’РѕР·РІСЂР°С‚ РІ РїСЂРёР»РѕР¶РµРЅРёРµ</title>
       <style>
         body { font-family: Arial, sans-serif; padding: 32px; background: #f7f3ec; color: #3d2a1f; }
         .card { max-width: 420px; margin: 0 auto; padding: 24px; background: white; border-radius: 18px; box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
@@ -678,9 +680,9 @@ app.get("/return", (req, res) => {
     </head>
     <body>
       <div class="card">
-        <h1>Возвращаем вас в приложение</h1>
-        <p>Если приложение не открылось автоматически, нажмите на ссылку ниже.</p>
-        <a href="${deepLink}">Открыть MalinkiEco</a>
+        <h1>Р’РѕР·РІСЂР°С‰Р°РµРј РІР°СЃ РІ РїСЂРёР»РѕР¶РµРЅРёРµ</h1>
+        <p>Р•СЃР»Рё РїСЂРёР»РѕР¶РµРЅРёРµ РЅРµ РѕС‚РєСЂС‹Р»РѕСЃСЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё, РЅР°Р¶РјРёС‚Рµ РЅР° СЃСЃС‹Р»РєСѓ РЅРёР¶Рµ.</p>
+        <a href="${deepLink}">РћС‚РєСЂС‹С‚СЊ MalinkiEco</a>
       </div>
       <script>window.location.replace(${JSON.stringify(deepLink)});</script>
     </body>
@@ -798,7 +800,7 @@ function normalizePlots(rawValue) {
 function cleanPlotValue(value) {
   return String(value || "")
     .trim()
-    .replace(/^участок\s*/i, "")
+    .replace(/^СѓС‡Р°СЃС‚РѕРє\s*/i, "")
     .trim();
 }
 
@@ -814,3 +816,4 @@ function normalizeRussianPhone(value) {
 function isValidRussianPhone(value) {
   return /^8\d{10}$/.test(String(value || ""));
 }
+
