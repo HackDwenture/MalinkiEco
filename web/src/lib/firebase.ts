@@ -10,7 +10,7 @@ const config = {
     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? 'malinkiecodb.firebasestorage.app',
   messagingSenderId:
     import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '370105725452',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? '1:370105725452:web:a372c85039226fba257429',
 }
 
 const missing = Object.entries(config)
