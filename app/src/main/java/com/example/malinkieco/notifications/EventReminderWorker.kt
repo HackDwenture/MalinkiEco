@@ -3,7 +3,6 @@ package com.example.malinkieco.notifications
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.example.malinkieco.BuildConfig
 import com.example.malinkieco.R
 import com.example.malinkieco.data.FirebaseRepository
 import com.google.firebase.auth.FirebaseAuth
@@ -33,7 +32,7 @@ class EventReminderWorker(
                 firestore = FirebaseFirestore.getInstance()
             )
             val store = EventStateStore(applicationContext)
-            if (BuildConfig.PAYMENTS_BACKEND_URL.isNotBlank() && store.isPushRegistrationConfirmed(profile.id)) {
+            if (store.isPushRegistrationConfirmed(profile.id)) {
                 return Result.success()
             }
             val unreadEvents = store.unreadEvents(profile.id, repository.getRecentEventsForUser(profile, EVENT_CHECK_LIMIT))

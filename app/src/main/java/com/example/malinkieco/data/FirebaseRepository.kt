@@ -39,6 +39,7 @@ class FirebaseRepository(
     private val events = firestore.collection(EVENTS_COLLECTION)
     private val auditLogs = firestore.collection(AUDIT_LOGS_COLLECTION)
     private val userDevices = firestore.collection(USER_DEVICES_COLLECTION)
+    private val notificationJobs = firestore.collection(NOTIFICATION_JOBS_COLLECTION)
 
     fun currentAuthUser(): FirebaseUser? = auth.currentUser
 
@@ -84,6 +85,52 @@ class FirebaseRepository(
         userDevices.document(deviceTokenDocumentId(userId, cleanToken)).delete().await()
     }
 
+    suspend fun enqueueBroadcastNotificationJob(
+        title: String,
+        body: String,
+        destination: String,
+        category: String = destination,
+        excludedUserIds: List<String> = emptyList(),
+        sendEmail: Boolean = false,
+        sendPush: Boolean = true
+    ) {
+        enqueueNotificationJob(
+            audience = "broadcast",
+            title = title,
+            body = body,
+            destination = destination,
+            category = category,
+            targetUserIds = emptyList(),
+            excludedUserIds = excludedUserIds,
+            sendEmail = sendEmail,
+            sendPush = sendPush
+        )
+    }
+
+    suspend fun enqueueTargetedNotificationJob(
+        userIds: List<String>,
+        title: String,
+        body: String,
+        destination: String,
+        category: String = destination,
+        sendEmail: Boolean = false,
+        sendPush: Boolean = true
+    ) {
+        val targetUserIds = userIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (targetUserIds.isEmpty()) return
+        enqueueNotificationJob(
+            audience = "users",
+            title = title,
+            body = body,
+            destination = destination,
+            category = category,
+            targetUserIds = targetUserIds,
+            excludedUserIds = emptyList(),
+            sendEmail = sendEmail,
+            sendPush = sendPush
+        )
+    }
+
     suspend fun getAllUsers(): List<RemoteUser> {
         val snapshot = users.orderBy("plotName", Query.Direction.ASCENDING).get().await()
         return snapshot.documents.mapNotNull { it.toRemoteUser() }
@@ -126,32 +173,28 @@ class FirebaseRepository(
         require(normalizedPhone.length == 11 && normalizedPhone.startsWith("8")) { "Phone must contain 10 digits after 8" }
         require(normalizedPlots.isNotEmpty()) { "At least one plot is required" }
 
-        try {
-            val result = auth.createUserWithEmailAndPassword(normalizeAuthEmail(normalizedLogin), password).await()
-            val uid = result.user?.uid ?: error("Created auth user has no uid")
-            val idToken = result.user?.getIdToken(false)?.await()?.token
-            registrationRequests.document(uid).set(
-                mapOf(
-                    "login" to normalizedLogin,
-                    "authEmail" to normalizeAuthEmail(normalizedLogin),
-                    "fullName" to fullName.trim(),
-                    "phone" to normalizedPhone,
-                    "plots" to normalizedPlots,
-                    "status" to RegistrationRequestStatus.PENDING.name,
-                    "reviewedByName" to "",
-                    "reviewReason" to "",
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "createdAtClient" to System.currentTimeMillis()
-                )
-            ).await()
-            return RegistrationSubmissionResult(
-                requestId = uid,
-                idToken = idToken,
-                staffUserIds = getStaffUserIds()
+        val result = auth.createUserWithEmailAndPassword(normalizeAuthEmail(normalizedLogin), password).await()
+        val uid = result.user?.uid ?: error("Created auth user has no uid")
+        val idToken = result.user?.getIdToken(false)?.await()?.token
+        registrationRequests.document(uid).set(
+            mapOf(
+                "login" to normalizedLogin,
+                "authEmail" to normalizeAuthEmail(normalizedLogin),
+                "fullName" to fullName.trim(),
+                "phone" to normalizedPhone,
+                "plots" to normalizedPlots,
+                "status" to RegistrationRequestStatus.PENDING.name,
+                "reviewedByName" to "",
+                "reviewReason" to "",
+                "createdAt" to FieldValue.serverTimestamp(),
+                "createdAtClient" to System.currentTimeMillis()
             )
-        } finally {
-            auth.signOut()
-        }
+        ).await()
+        return RegistrationSubmissionResult(
+            requestId = uid,
+            idToken = idToken,
+            staffUserIds = getStaffUserIds()
+        )
     }
 
     suspend fun getStaffUserIds(): List<String> {
@@ -1139,6 +1182,47 @@ class FirebaseRepository(
         }
     }
 
+    private suspend fun enqueueNotificationJob(
+        audience: String,
+        title: String,
+        body: String,
+        destination: String,
+        category: String,
+        targetUserIds: List<String>,
+        excludedUserIds: List<String>,
+        sendEmail: Boolean,
+        sendPush: Boolean
+    ) {
+        val cleanTitle = title.trim()
+        val cleanBody = body.trim()
+        val cleanDestination = destination.trim()
+        val cleanCategory = category.trim().ifBlank { cleanDestination }
+        val createdAtClient = System.currentTimeMillis()
+        if (cleanTitle.isBlank() || cleanBody.isBlank() || cleanDestination.isBlank()) return
+
+        notificationJobs.add(
+            mapOf(
+                "status" to "PENDING",
+                "title" to cleanTitle,
+                "body" to cleanBody,
+                "audience" to audience,
+                "destination" to cleanDestination,
+                "category" to cleanCategory,
+                "targetUserIds" to targetUserIds.distinct(),
+                "excludedUserIds" to excludedUserIds.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+                "sendEmail" to sendEmail,
+                "sendPush" to sendPush,
+                "attempts" to 0,
+                "createdById" to (currentAuthUser()?.uid ?: ""),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "createdAtClient" to createdAtClient,
+                "nextAttemptAtClient" to createdAtClient,
+                "processingWorker" to "",
+                "lastError" to ""
+            )
+        ).await()
+    }
+
     private fun DocumentSnapshot.toAuditLogEntry(): AuditLogEntry? {
         val actorId = getString("actorId") ?: return null
         val actorName = getString("actorName") ?: return null
@@ -1311,6 +1395,7 @@ class FirebaseRepository(
         private const val EVENTS_COLLECTION = "events"
         private const val AUDIT_LOGS_COLLECTION = "audit_logs"
         private const val USER_DEVICES_COLLECTION = "user_devices"
+        private const val NOTIFICATION_JOBS_COLLECTION = "notification_jobs"
     }
 }
 

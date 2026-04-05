@@ -2,7 +2,6 @@ package com.example.malinkieco.notifications
 
 import com.example.malinkieco.R
 import com.example.malinkieco.data.FirebaseRepository
-import com.example.malinkieco.data.PushBackendClient
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -52,17 +51,11 @@ class MalinkiMessagingService : FirebaseMessagingService() {
             auth = auth,
             firestore = FirebaseFirestore.getInstance()
         )
-        val client = PushBackendClient()
-
         user.getIdToken(true)
-            .addOnSuccessListener { result ->
-                val idToken = result.token ?: return@addOnSuccessListener
+            .addOnSuccessListener {
                 CoroutineScope(Dispatchers.IO).launch {
                     runCatching {
                         repository.registerDeviceToken(user.uid, token)
-                        if (client.isConfigured()) {
-                            client.registerDeviceToken(idToken, token)
-                        }
                         store.setPushRegistrationConfirmed(user.uid, true)
                     }.onFailure {
                         store.setPushRegistrationConfirmed(user.uid, false)

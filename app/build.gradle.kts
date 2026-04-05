@@ -4,8 +4,6 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-val paymentsBackendUrl = (project.findProperty("PAYMENTS_BACKEND_URL") as String?) ?: ""
-
 android {
     namespace = "com.example.malinkieco"
     compileSdk {
@@ -18,7 +16,6 @@ android {
         targetSdk = 36
         versionCode = 7
         versionName = "v2.2b"
-        buildConfigField("String", "PAYMENTS_BACKEND_URL", "\"$paymentsBackendUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

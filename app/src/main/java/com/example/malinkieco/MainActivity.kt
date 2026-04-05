@@ -50,7 +50,6 @@ import com.example.malinkieco.data.ChargeSuggestion
 import com.example.malinkieco.data.ManualPaymentRequest
 import com.example.malinkieco.data.ManualPaymentStatus
 import com.example.malinkieco.data.PaymentTransferConfig
-import com.example.malinkieco.data.PushBackendClient
 import com.example.malinkieco.data.RegistrationRequest
 import com.example.malinkieco.data.RegistrationRequestStatus
 import com.example.malinkieco.data.RemoteUser
@@ -241,7 +240,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var repository: FirebaseRepository
     private lateinit var eventStateStore: EventStateStore
-    private val pushBackendClient = PushBackendClient()
     private lateinit var userAdapter: UserListAdapter
     private lateinit var chatAdapter: ChatAdapter
     private lateinit var eventAdapter: EventAdapter
@@ -377,12 +375,10 @@ class MainActivity : AppCompatActivity() {
             firestore = FirebaseFirestore.getInstance()
         )
         eventStateStore = EventStateStore(applicationContext)
-        if (pushBackendClient.isConfigured()) {
-            runCatching {
-                FirebaseMessaging.getInstance().isAutoInitEnabled = true
-                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-                    eventStateStore.setCachedFcmToken(token)
-                }
+        runCatching {
+            FirebaseMessaging.getInstance().isAutoInitEnabled = true
+            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                eventStateStore.setCachedFcmToken(token)
             }
         }
 
@@ -412,7 +408,7 @@ class MainActivity : AppCompatActivity() {
         mainHandler.removeCallbacks(connectivityWatchdog)
         mainHandler.postDelayed(connectivityWatchdog, CONNECTIVITY_WATCHDOG_MS)
         checkStartupRequirements()
-        if (currentUser != null && pushBackendClient.isConfigured()) {
+        if (currentUser != null) {
             lifecycleScope.launch {
                 runCatching { registerDeviceForPush() }
             }
@@ -1467,7 +1463,7 @@ class MainActivity : AppCompatActivity() {
             eventStateStore.setLastChatNotificationTimestamp(user.id, latestTimestamp)
             return
         }
-        if (pushBackendClient.isConfigured() && eventStateStore.isPushRegistrationConfirmed(user.id)) {
+        if (eventStateStore.isPushRegistrationConfirmed(user.id)) {
             eventStateStore.setLastChatNotificationTimestamp(user.id, latestTimestamp)
             return
         }
@@ -1509,7 +1505,7 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
-        if (pushBackendClient.isConfigured() && eventStateStore.isPushRegistrationConfirmed(user.id)) {
+        if (eventStateStore.isPushRegistrationConfirmed(user.id)) {
             return
         }
 
@@ -1654,7 +1650,8 @@ class MainActivity : AppCompatActivity() {
                             body = title,
                             destination = "events",
                             category = "events",
-                            excludedUserIds = listOf(creator.id)
+                            excludedUserIds = listOf(creator.id),
+                            sendEmail = true
                         )
                     }
                 }
@@ -3140,21 +3137,23 @@ class MainActivity : AppCompatActivity() {
                         plots = plots
                     )
                 }
-                val registrationIdToken = submission.idToken
-                if (pushBackendClient.isConfigured() && !registrationIdToken.isNullOrBlank() && submission.staffUserIds.isNotEmpty()) {
+                if (submission.staffUserIds.isNotEmpty()) {
                     runCatching {
-                        pushBackendClient.publishToUsers(
-                            registrationIdToken,
-                            submission.staffUserIds,
+                        repository.enqueueTargetedNotificationJob(
+                            userIds = submission.staffUserIds,
                             getString(R.string.push_registration_request_created_title),
                             getString(R.string.push_registration_request_created_body, fullName.trim(), plots.joinToString(", ")),
-                            "residents",
-                            "registration_requests"
+                            destination = "residents",
+                            category = "registration_requests",
+                            sendEmail = false,
+                            sendPush = true
                         )
                     }
                 }
+                repository.logout()
                 showRegistrationPendingDialog()
             } catch (error: Exception) {
+                repository.logout()
                 toast(getString(R.string.registration_request_send_failed, humanReadableRegistrationError(error)))
             }
         }
@@ -3240,26 +3239,28 @@ class MainActivity : AppCompatActivity() {
                                 plots = selectedPlots.toList()
                             )
                         }
-                        val registrationIdToken = submission.idToken
-                        if (pushBackendClient.isConfigured() && !registrationIdToken.isNullOrBlank() && submission.staffUserIds.isNotEmpty()) {
+                        if (submission.staffUserIds.isNotEmpty()) {
                             runCatching {
-                                pushBackendClient.publishToUsers(
-                                    registrationIdToken,
-                                    submission.staffUserIds,
+                                repository.enqueueTargetedNotificationJob(
+                                    userIds = submission.staffUserIds,
                                     getString(R.string.push_registration_request_created_title),
                                     getString(
                                         R.string.push_registration_request_created_body,
                                         displayName,
                                         selectedPlots.joinToString(", ")
                                     ),
-                                    "residents",
-                                    "registration_requests"
+                                    destination = "residents",
+                                    category = "registration_requests",
+                                    sendEmail = false,
+                                    sendPush = true
                                 )
                             }
                         }
+                        repository.logout()
                         dialog.dismiss()
                         showRegistrationPendingDialog()
                     } catch (error: Exception) {
+                        repository.logout()
                         toast(getString(R.string.registration_request_send_failed, humanReadableRegistrationError(error)))
                     }
                 }
@@ -3416,11 +3417,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun registerDeviceForPush() {
-        if (!pushBackendClient.isConfigured()) return
         val userId = currentUser?.id ?: return
         FirebaseMessaging.getInstance().isAutoInitEnabled = true
         repeat(3) { attempt ->
-            val idToken = currentFirebaseIdToken() ?: return
             val cachedToken = eventStateStore.getCachedFcmToken()
             val fcmToken = if (cachedToken.isNotBlank()) {
                 cachedToken
@@ -3429,20 +3428,9 @@ class MainActivity : AppCompatActivity() {
             }
             runCatching {
                 repository.registerDeviceToken(userId, fcmToken)
-            }
-            runCatching {
-                pushBackendClient.registerDeviceToken(idToken, fcmToken)
-                pushBackendClient.getRegisteredDeviceCount(idToken)
-            }.onSuccess { registeredCount ->
-                val confirmed = registeredCount > 0
-                eventStateStore.setPushRegistrationConfirmed(userId, confirmed)
-                if (confirmed) {
-                    return
-                }
-                if (attempt < 2) {
-                    FirebaseMessaging.getInstance().token.awaitResult().also { eventStateStore.setCachedFcmToken(it) }
-                    kotlinx.coroutines.delay(1200)
-                }
+            }.onSuccess {
+                eventStateStore.setPushRegistrationConfirmed(userId, true)
+                return
             }.onFailure {
                 eventStateStore.setPushRegistrationConfirmed(userId, false)
                 if (attempt < 2) {
@@ -3455,21 +3443,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun currentFirebaseIdToken(): String? {
-        val firebaseUser = repository.currentAuthUser() ?: return null
-        return firebaseUser.getIdToken(true).awaitResult().token
-    }
-
     private suspend fun publishBroadcastPush(
         title: String,
         body: String,
         destination: String,
         category: String = destination,
-        excludedUserIds: List<String> = emptyList()
+        excludedUserIds: List<String> = emptyList(),
+        sendEmail: Boolean = false
     ) {
-        if (!pushBackendClient.isConfigured()) return
-        val idToken = currentFirebaseIdToken() ?: return
-        pushBackendClient.publishBroadcast(idToken, title, body, destination, category, excludedUserIds)
+        repository.enqueueBroadcastNotificationJob(
+            title = title,
+            body = body,
+            destination = destination,
+            category = category,
+            excludedUserIds = excludedUserIds,
+            sendEmail = sendEmail,
+            sendPush = true
+        )
     }
 
     private suspend fun publishTargetedPush(
@@ -3477,11 +3467,19 @@ class MainActivity : AppCompatActivity() {
         title: String,
         body: String,
         destination: String,
-        category: String = destination
+        category: String = destination,
+        sendEmail: Boolean = false
     ) {
-        if (!pushBackendClient.isConfigured() || userIds.isEmpty()) return
-        val idToken = currentFirebaseIdToken() ?: return
-        pushBackendClient.publishToUsers(idToken, userIds, title, body, destination, category)
+        if (userIds.isEmpty()) return
+        repository.enqueueTargetedNotificationJob(
+            userIds = userIds,
+            title = title,
+            body = body,
+            destination = destination,
+            category = category,
+            sendEmail = sendEmail,
+            sendPush = true
+        )
     }
 
     private fun toast(message: String) {

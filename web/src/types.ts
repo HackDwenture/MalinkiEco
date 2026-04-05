@@ -111,7 +111,6 @@ export type AuthFormState = {
   fullName: string
   phone: string
   plots: string
-  verificationCode: string
 }
 
 export type PollDraft = {

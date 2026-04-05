@@ -1,4 +1,4 @@
-import {
+﻿import {
   addDoc,
   arrayUnion,
   collection,
@@ -13,14 +13,7 @@ import {
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
-import {
-  createUserWithEmailAndPassword,
-  getIdToken,
-  signOut,
-  type Auth,
-} from 'firebase/auth'
 import type {
-  AuthFormState,
   ChatMessage,
   CommunityEvent,
   EventType,
@@ -29,21 +22,8 @@ import type {
   RemoteUser,
   Role,
 } from '../types'
-import {
-  formatPlots,
-  isValidRussianPhoneInput,
-  normalizeAuthEmail,
-  normalizeRussianPhone,
-  parsePlots,
-} from '../utils'
+import { formatPlots } from '../utils'
 import { INITIAL_POLL_DRAFT } from '../constants'
-
-const DEFAULT_BACKEND_URL = 'https://malinkieco-production.up.railway.app'
-
-function backendUrl(path: string) {
-  const base = (import.meta.env.VITE_BACKEND_URL ?? DEFAULT_BACKEND_URL).replace(/\/$/, '')
-  return `${base}${path}`
-}
 
 type EventDraft = {
   title: string
@@ -52,46 +32,64 @@ type EventDraft = {
   amount: number
 }
 
-export async function publishBroadcastNotification(
-  auth: Auth,
-  payload: {
-    title: string
-    body: string
-    destination: string
-    category: string
-    excludedUserIds?: string[]
-  },
+type NotificationJobPayload = {
+  title: string
+  body: string
+  destination: string
+  category: string
+  excludedUserIds?: string[]
+  targetUserIds?: string[]
+  sendEmail?: boolean
+  sendPush?: boolean
+}
+
+async function enqueueNotificationJob(
+  db: Firestore,
+  audience: 'broadcast' | 'users',
+  payload: NotificationJobPayload,
 ) {
-  const currentUser = auth.currentUser
-  if (!currentUser) throw new Error('Пользователь не авторизован')
+  const title = payload.title.trim()
+  const body = payload.body.trim()
+  const destination = payload.destination.trim()
+  const category = payload.category.trim()
+  const targetUserIds = (payload.targetUserIds ?? []).map((item) => item.trim()).filter(Boolean)
+  const excludedUserIds = (payload.excludedUserIds ?? []).map((item) => item.trim()).filter(Boolean)
 
-  const idToken = await getIdToken(currentUser, true)
-  const response = await fetch(backendUrl('/api/notifications/publish'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      audience: 'broadcast',
-      title: payload.title,
-      body: payload.body,
-      destination: payload.destination,
-      category: payload.category,
-      excludedUserIds: payload.excludedUserIds ?? [],
-    }),
-  })
-
-  if (!response.ok) {
-    let errorText = 'Не удалось отправить уведомление'
-    try {
-      const payload = await response.json()
-      if (payload?.error) errorText = String(payload.error)
-    } catch {
-      // ignore json parse error
-    }
-    throw new Error(errorText)
+  if (!title || !body || !destination || !category) {
+    throw new Error('Не удалось подготовить уведомление для отправки.')
   }
+
+  if (audience === 'users' && targetUserIds.length === 0) {
+    return
+  }
+
+  const createdAtClient = Date.now()
+  await addDoc(collection(db, 'notification_jobs'), {
+    status: 'PENDING',
+    title,
+    body,
+    audience,
+    destination,
+    category,
+    targetUserIds,
+    excludedUserIds,
+    sendEmail: payload.sendEmail ?? false,
+    sendPush: payload.sendPush ?? true,
+    attempts: 0,
+    createdAt: serverTimestamp(),
+    createdAtClient,
+    nextAttemptAtClient: createdAtClient,
+    processingWorker: '',
+    lastError: '',
+  })
+}
+
+export async function enqueueBroadcastNotification(db: Firestore, payload: NotificationJobPayload) {
+  await enqueueNotificationJob(db, 'broadcast', payload)
+}
+
+export async function enqueueTargetedNotification(db: Firestore, payload: NotificationJobPayload) {
+  await enqueueNotificationJob(db, 'users', payload)
 }
 
 async function createAuditLog(
@@ -161,37 +159,6 @@ function splitAmountAcrossPlots(plots: string[], amount: number) {
   return shares
 }
 
-export async function submitRegistrationRequest(auth: Auth, db: Firestore, form: AuthFormState) {
-  const login = form.login.trim()
-  const fullName = form.fullName.trim()
-  const phoneDigits = form.phone.replace(/\D/g, '')
-  const plots = parsePlots(form.plots)
-
-  if (!login) throw new Error('Введите логин или почту')
-  if (!fullName) throw new Error('Введите отображаемое имя')
-  if (form.password.trim().length < 6) throw new Error('Пароль должен быть не короче 6 символов')
-  if (!isValidRussianPhoneInput(phoneDigits)) throw new Error('Номер телефона должен содержать 10 цифр после 8')
-  if (plots.length === 0) throw new Error('Укажите хотя бы один участок')
-
-  const credential = await createUserWithEmailAndPassword(auth, normalizeAuthEmail(login), form.password)
-  const userId = credential.user.uid
-
-  await setDoc(doc(db, 'registration_requests', userId), {
-    login,
-    authEmail: normalizeAuthEmail(login),
-    fullName,
-    phone: normalizeRussianPhone(phoneDigits),
-    plots,
-    status: 'PENDING',
-    reviewedByName: '',
-    reviewReason: '',
-    createdAt: serverTimestamp(),
-    createdAtClient: Date.now(),
-  })
-
-  await signOut(auth)
-}
-
 export async function approveRegistrationRequest(
   db: Firestore,
   reviewer: RemoteUser,
@@ -228,8 +195,8 @@ export async function approveRegistrationRequest(
   await createAuditLog(
     db,
     reviewer,
-    'Одобрена регистрация',
-    'Заявка на регистрацию одобрена.',
+    'РћРґРѕР±СЂРµРЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЏ',
+    'Р—Р°СЏРІРєР° РЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЋ РѕРґРѕР±СЂРµРЅР°.',
     request.id,
     request.fullName,
     request.plots.join(', '),
@@ -255,10 +222,10 @@ export async function rejectRegistrationRequest(
   await createAuditLog(
     db,
     reviewer,
-    'Отклонена регистрация',
+    'РћС‚РєР»РѕРЅРµРЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЏ',
     normalizedReason
-      ? `Заявка на регистрацию отклонена. Причина: ${normalizedReason}.`
-      : 'Заявка на регистрацию отклонена.',
+      ? `Р—Р°СЏРІРєР° РЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЋ РѕС‚РєР»РѕРЅРµРЅР°. РџСЂРёС‡РёРЅР°: ${normalizedReason}.`
+      : 'Р—Р°СЏРІРєР° РЅР° СЂРµРіРёСЃС‚СЂР°С†РёСЋ РѕС‚РєР»РѕРЅРµРЅР°.',
     request.id,
     request.fullName,
     request.plots.join(', '),
@@ -275,8 +242,8 @@ export async function setUserBalance(
   await createAuditLog(
     db,
     actor,
-    'Изменен баланс участника',
-    `Баланс изменен с ${targetUser.balance} ₽ на ${newBalance} ₽.`,
+    'РР·РјРµРЅРµРЅ Р±Р°Р»Р°РЅСЃ СѓС‡Р°СЃС‚РЅРёРєР°',
+    `Р‘Р°Р»Р°РЅСЃ РёР·РјРµРЅРµРЅ СЃ ${targetUser.balance} в‚Ѕ РЅР° ${newBalance} в‚Ѕ.`,
     targetUser.id,
     targetUser.fullName,
     formatPlots(targetUser),
@@ -293,43 +260,32 @@ export async function setUserRole(
   await createAuditLog(
     db,
     actor,
-    role === 'MODERATOR' ? 'Назначен модератор' : 'Снята роль модератора',
+    role === 'MODERATOR' ? 'РќР°Р·РЅР°С‡РµРЅ РјРѕРґРµСЂР°С‚РѕСЂ' : 'РЎРЅСЏС‚Р° СЂРѕР»СЊ РјРѕРґРµСЂР°С‚РѕСЂР°',
     role === 'MODERATOR'
-      ? 'Пользователю назначена роль модератора.'
-      : 'Пользователь переведен в обычные участники.',
+      ? 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЋ РЅР°Р·РЅР°С‡РµРЅР° СЂРѕР»СЊ РјРѕРґРµСЂР°С‚РѕСЂР°.'
+      : 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРµСЂРµРІРµРґРµРЅ РІ РѕР±С‹С‡РЅС‹Рµ СѓС‡Р°СЃС‚РЅРёРєРё.',
     targetUser.id,
     targetUser.fullName,
     formatPlots(targetUser),
   )
 }
 
-export async function deleteUserRecord(
-  auth: Auth,
-  targetUser: RemoteUser,
-) {
-  const currentUser = auth.currentUser
-  if (!currentUser) throw new Error('Пользователь не авторизован')
+export async function deleteUserRecord(db: Firestore, actor: RemoteUser, targetUser: RemoteUser) {
+  await Promise.all([
+    deleteDoc(doc(db, 'users', targetUser.id)),
+    deleteDoc(doc(db, 'registration_requests', targetUser.id)),
+  ])
 
-  const idToken = await getIdToken(currentUser, true)
-  const response = await fetch(backendUrl(`/api/admin/users/${encodeURIComponent(targetUser.id)}`), {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
-  })
-
-  if (!response.ok) {
-    let errorText = 'Не удалось удалить пользователя'
-    try {
-      const payload = await response.json()
-      if (payload?.error) errorText = String(payload.error)
-    } catch {
-      // ignore json parse error
-    }
-    throw new Error(errorText)
-  }
+  await createAuditLog(
+    db,
+    actor,
+    'Удален пользователь',
+    'Пользователь лишен доступа к приложению и веб-версии.',
+    targetUser.id,
+    targetUser.fullName,
+    formatPlots(targetUser),
+  )
 }
-
 export async function markChatRead(db: Firestore, userId: string, latestSeen: number, currentLastReadAt: number) {
   if (latestSeen <= 0 || latestSeen <= currentLastReadAt) return
   await updateDoc(doc(db, 'users', userId), { lastChatReadAt: latestSeen })
@@ -391,9 +347,9 @@ export async function createEvent(db: Firestore, creator: RemoteUser, draft: Eve
   const amount = Math.max(0, Math.round(draft.amount))
   const type = draft.type
 
-  if (!title) throw new Error('Укажите заголовок')
+  if (!title) throw new Error('РЈРєР°Р¶РёС‚Рµ Р·Р°РіРѕР»РѕРІРѕРє')
   if ((type === 'CHARGE' || type === 'EXPENSE') && amount <= 0) {
-    throw new Error('Сумма должна быть больше нуля')
+    throw new Error('РЎСѓРјРјР° РґРѕР»Р¶РЅР° Р±С‹С‚СЊ Р±РѕР»СЊС€Рµ РЅСѓР»СЏ')
   }
 
   const eventPayload = {
@@ -447,7 +403,7 @@ export async function createEvent(db: Firestore, creator: RemoteUser, draft: Eve
       const fundsSnapshot = await transaction.get(fundsRef)
       const currentFunds = Number(fundsSnapshot.data()?.amount ?? 0)
       if (currentFunds < amount) {
-        throw new Error('Недостаточно средств в общей кассе')
+        throw new Error('РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ СЃСЂРµРґСЃС‚РІ РІ РѕР±С‰РµР№ РєР°СЃСЃРµ')
       }
 
       transaction.set(fundsRef, { amount: currentFunds - amount })
@@ -461,8 +417,8 @@ export async function createEvent(db: Firestore, creator: RemoteUser, draft: Eve
     await createAuditLog(
       db,
       creator,
-      type === 'CHARGE' ? 'Создан сбор' : type === 'EXPENSE' ? 'Создана оплата' : 'Создано объявление',
-      (type === 'CHARGE' || type === 'EXPENSE') ? `${title}. Сумма: ${amount} ₽.` : title,
+      type === 'CHARGE' ? 'РЎРѕР·РґР°РЅ СЃР±РѕСЂ' : type === 'EXPENSE' ? 'РЎРѕР·РґР°РЅР° РѕРїР»Р°С‚Р°' : 'РЎРѕР·РґР°РЅРѕ РѕР±СЉСЏРІР»РµРЅРёРµ',
+      (type === 'CHARGE' || type === 'EXPENSE') ? `${title}. РЎСѓРјРјР°: ${amount} в‚Ѕ.` : title,
     )
   }
 }
@@ -470,7 +426,7 @@ export async function createEvent(db: Firestore, creator: RemoteUser, draft: Eve
 export async function closeCharge(db: Firestore, reviewer: RemoteUser, event: CommunityEvent) {
   if (event.type !== 'CHARGE' || event.isClosed) return
   if (reviewer.role !== 'ADMIN' && reviewer.role !== 'MODERATOR') {
-    throw new Error('Закрыть сбор может только модератор или администратор')
+    throw new Error('Р—Р°РєСЂС‹С‚СЊ СЃР±РѕСЂ РјРѕР¶РµС‚ С‚РѕР»СЊРєРѕ РјРѕРґРµСЂР°С‚РѕСЂ РёР»Рё Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ')
   }
 
   await updateDoc(doc(db, 'events', event.id), {
@@ -479,11 +435,11 @@ export async function closeCharge(db: Firestore, reviewer: RemoteUser, event: Co
     closedByName: reviewer.fullName,
     closedAtClient: Date.now(),
     message: event.message.trim()
-      ? `${event.message.trim()}\n\nСбор завершен.`
-      : 'Сбор завершен.',
+      ? `${event.message.trim()}\n\nРЎР±РѕСЂ Р·Р°РІРµСЂС€РµРЅ.`
+      : 'РЎР±РѕСЂ Р·Р°РІРµСЂС€РµРЅ.',
   })
 
-  await createAuditLog(db, reviewer, 'Закрыт сбор', event.title)
+  await createAuditLog(db, reviewer, 'Р—Р°РєСЂС‹С‚ СЃР±РѕСЂ', event.title)
 }
 
 export async function submitPoll(db: Firestore, profile: RemoteUser, pollDraft: PollDraft) {
@@ -495,8 +451,8 @@ export async function submitPoll(db: Firestore, profile: RemoteUser, pollDraft: 
     .filter(Boolean)
     .slice(0, 8)
 
-  if (!title) throw new Error('Укажите заголовок опроса')
-  if (options.length < 2) throw new Error('Для опроса нужно минимум два варианта ответа')
+  if (!title) throw new Error('РЈРєР°Р¶РёС‚Рµ Р·Р°РіРѕР»РѕРІРѕРє РѕРїСЂРѕСЃР°')
+  if (options.length < 2) throw new Error('Р”Р»СЏ РѕРїСЂРѕСЃР° РЅСѓР¶РЅРѕ РјРёРЅРёРјСѓРј РґРІР° РІР°СЂРёР°РЅС‚Р° РѕС‚РІРµС‚Р°')
 
   await addDoc(collection(db, 'events'), {
     title,
@@ -519,7 +475,7 @@ export async function submitPoll(db: Firestore, profile: RemoteUser, pollDraft: 
   })
 
   if (profile.role === 'ADMIN' || profile.role === 'MODERATOR') {
-    await createAuditLog(db, profile, 'Создан опрос', title)
+    await createAuditLog(db, profile, 'РЎРѕР·РґР°РЅ РѕРїСЂРѕСЃ', title)
   }
 
   return INITIAL_POLL_DRAFT
@@ -528,7 +484,7 @@ export async function submitPoll(db: Firestore, profile: RemoteUser, pollDraft: 
 export async function closePoll(db: Firestore, profile: RemoteUser, poll: CommunityEvent) {
   if (poll.isClosed) return
   if (poll.createdById !== profile.id && profile.role !== 'MODERATOR' && profile.role !== 'ADMIN') {
-    throw new Error('Закрыть опрос может только создатель, модератор или администратор')
+    throw new Error('Р—Р°РєСЂС‹С‚СЊ РѕРїСЂРѕСЃ РјРѕР¶РµС‚ С‚РѕР»СЊРєРѕ СЃРѕР·РґР°С‚РµР»СЊ, РјРѕРґРµСЂР°С‚РѕСЂ РёР»Рё Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ')
   }
 
   await updateDoc(doc(db, 'events', poll.id), {
@@ -540,7 +496,7 @@ export async function closePoll(db: Firestore, profile: RemoteUser, poll: Commun
   })
 
   if (profile.role === 'ADMIN' || profile.role === 'MODERATOR') {
-    await createAuditLog(db, profile, 'Закрыт опрос', poll.title)
+    await createAuditLog(db, profile, 'Р—Р°РєСЂС‹С‚ РѕРїСЂРѕСЃ', poll.title)
   }
 }
 
@@ -557,7 +513,7 @@ export async function createPaymentRequest(
     return array.findIndex((candidate) => candidate.id === item.id) === index
   })
 
-  if (normalizedAmount <= 0) throw new Error('Укажите сумму больше нуля')
+  if (normalizedAmount <= 0) throw new Error('РЈРєР°Р¶РёС‚Рµ СЃСѓРјРјСѓ Р±РѕР»СЊС€Рµ РЅСѓР»СЏ')
 
   await addDoc(collection(db, 'payment_requests'), {
     userId: profile.id,
@@ -673,22 +629,22 @@ export async function confirmPaymentRequest(
     db,
     reviewer,
     confirmedRequest.userId,
-    'Оплата подтверждена',
+    'РћРїР»Р°С‚Р° РїРѕРґС‚РІРµСЂР¶РґРµРЅР°',
     confirmedRequest.eventTitle
-      ? `Ваш платеж на сумму ${confirmedRequest.amount} ₽ подтвержден. Назначение: ${confirmedRequest.eventTitle}.`
+      ? `Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${confirmedRequest.amount} в‚Ѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅ. РќР°Р·РЅР°С‡РµРЅРёРµ: ${confirmedRequest.eventTitle}.`
       : confirmedRequest.purpose
-        ? `Ваш платеж на сумму ${confirmedRequest.amount} ₽ подтвержден. Назначение: ${confirmedRequest.purpose}.`
-        : `Ваш платеж на сумму ${confirmedRequest.amount} ₽ подтвержден.`,
+        ? `Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${confirmedRequest.amount} в‚Ѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅ. РќР°Р·РЅР°С‡РµРЅРёРµ: ${confirmedRequest.purpose}.`
+        : `Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${confirmedRequest.amount} в‚Ѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅ.`,
   )
   await createAuditLog(
     db,
     reviewer,
-    'Подтверждена оплата',
+    'РџРѕРґС‚РІРµСЂР¶РґРµРЅР° РѕРїР»Р°С‚Р°',
     confirmedRequest.eventTitle
-      ? `Подтверждена оплата на ${confirmedRequest.amount} ₽. Назначение: ${confirmedRequest.eventTitle}.`
+      ? `РџРѕРґС‚РІРµСЂР¶РґРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${confirmedRequest.amount} в‚Ѕ. РќР°Р·РЅР°С‡РµРЅРёРµ: ${confirmedRequest.eventTitle}.`
       : confirmedRequest.purpose
-        ? `Подтверждена оплата на ${confirmedRequest.amount} ₽. Назначение: ${confirmedRequest.purpose}.`
-        : `Подтверждена оплата на ${confirmedRequest.amount} ₽.`,
+        ? `РџРѕРґС‚РІРµСЂР¶РґРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${confirmedRequest.amount} в‚Ѕ. РќР°Р·РЅР°С‡РµРЅРёРµ: ${confirmedRequest.purpose}.`
+        : `РџРѕРґС‚РІРµСЂР¶РґРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${confirmedRequest.amount} в‚Ѕ.`,
     confirmedRequest.userId,
     confirmedRequest.userName,
     confirmedRequest.plotName,
@@ -725,18 +681,18 @@ export async function rejectPaymentRequest(
     db,
     reviewer,
     userId,
-    'Оплата отклонена',
+    'РћРїР»Р°С‚Р° РѕС‚РєР»РѕРЅРµРЅР°',
     normalizedReason
-      ? `Ваш платеж на сумму ${amount} ₽ отклонен. Причина: ${normalizedReason}.`
-      : `Ваш платеж на сумму ${amount} ₽ отклонен. Уточните детали у администратора или модератора.`,
+      ? `Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${amount} в‚Ѕ РѕС‚РєР»РѕРЅРµРЅ. РџСЂРёС‡РёРЅР°: ${normalizedReason}.`
+      : `Р’Р°С€ РїР»Р°С‚РµР¶ РЅР° СЃСѓРјРјСѓ ${amount} в‚Ѕ РѕС‚РєР»РѕРЅРµРЅ. РЈС‚РѕС‡РЅРёС‚Рµ РґРµС‚Р°Р»Рё Сѓ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РёР»Рё РјРѕРґРµСЂР°С‚РѕСЂР°.`,
   )
   await createAuditLog(
     db,
     reviewer,
-    'Отклонена оплата',
+    'РћС‚РєР»РѕРЅРµРЅР° РѕРїР»Р°С‚Р°',
     normalizedReason
-      ? `Отклонена оплата на ${amount} ₽. Причина: ${normalizedReason}.`
-      : `Отклонена оплата на ${amount} ₽.`,
+      ? `РћС‚РєР»РѕРЅРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${amount} в‚Ѕ. РџСЂРёС‡РёРЅР°: ${normalizedReason}.`
+      : `РћС‚РєР»РѕРЅРµРЅР° РѕРїР»Р°С‚Р° РЅР° ${amount} в‚Ѕ.`,
     userId,
     userName,
     plotName,

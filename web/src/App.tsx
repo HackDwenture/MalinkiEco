@@ -9,8 +9,9 @@ import {
   createEvent as createEventRequest,
   createPaymentRequest as createPaymentRequestRequest,
   deleteUserRecord,
+  enqueueBroadcastNotification,
+  enqueueTargetedNotification,
   markChatRead as markChatReadRequest,
-  publishBroadcastNotification,
   rejectPaymentRequest as rejectPaymentRequestAction,
   rejectRegistrationRequest as rejectRegistrationRequestAction,
   removeChatMessage as removeChatMessageRequest,
@@ -107,6 +108,14 @@ function App() {
   const pendingRegistrationRequestsCount =
     registrationRequests.filter((request) => request.status === 'PENDING').length
   const pendingOwnersItemsCount = pendingPaymentRequestsCount + pendingRegistrationRequestsCount
+  const staffUserIds = useMemo(
+    () =>
+      owners
+        .filter((owner) => owner.role === 'ADMIN' || owner.role === 'MODERATOR')
+        .map((owner) => owner.id)
+        .filter(Boolean),
+    [owners],
+  )
 
   const visibleTabs = useMemo<TabKey[]>(
     () => (isStaff ? ['events', 'chat', 'owners', 'polls', 'payments', 'logs'] : ['events', 'chat', 'owners', 'polls', 'payments']),
@@ -150,6 +159,17 @@ function App() {
 
     try {
       await sendChatMessageRequest(db, profile, text, replyTo)
+      try {
+        await enqueueBroadcastNotification(db, {
+          title: 'Новое сообщение в чате',
+          body: `${profile.fullName}: ${text.trim()}`,
+          destination: 'chat',
+          category: 'chat',
+          excludedUserIds: [profile.id],
+        })
+      } catch {
+        showNotice('Сообщение отправлено, но push-уведомление пока не поставлено в очередь.')
+      }
     } catch {
       showNotice('Сообщение пока не отправилось. Проверьте интернет и попробуйте еще раз.')
       throw new Error('send-failed')
@@ -173,22 +193,34 @@ function App() {
   }
 
   const createEvent = async (payload: { title: string; message: string; type: EventType; amount: number }) => {
-    if (!db || !profile || !auth) return
+    if (!db || !profile) return
 
     try {
       await createEventRequest(db, profile, payload)
-      await publishBroadcastNotification(auth, {
-        title:
+      try {
+        await enqueueBroadcastNotification(db, {
+          title:
+            payload.type === 'CHARGE'
+              ? 'Новый сбор средств'
+              : payload.type === 'EXPENSE'
+                ? 'Новая оплата из общей суммы'
+                : 'Новое объявление',
+          body: payload.title,
+          destination: 'events',
+          category: 'events',
+          excludedUserIds: [profile.id],
+          sendEmail: true,
+        })
+      } catch {
+        showNotice(
           payload.type === 'CHARGE'
-            ? 'Новый сбор средств'
+            ? 'Сбор создан, но уведомление пока не поставлено в очередь.'
             : payload.type === 'EXPENSE'
-              ? 'Новая оплата из общей суммы'
-              : 'Новое объявление',
-        body: payload.title,
-        destination: 'events',
-        category: 'events',
-        excludedUserIds: [profile.id],
-      })
+              ? 'Оплата из кассы создана, но уведомление пока не поставлено в очередь.'
+              : 'Объявление создано, но уведомление пока не поставлено в очередь.',
+        )
+        return
+      }
       showNotice(
         payload.type === 'CHARGE'
           ? 'Сбор создан'
@@ -208,6 +240,18 @@ function App() {
     setPollSubmitting(true)
     try {
       setPollDraft(await submitPollRequest(db, profile, pollDraft))
+      try {
+        await enqueueBroadcastNotification(db, {
+          title: 'Новый опрос',
+          body: pollDraft.title.trim(),
+          destination: 'polls',
+          category: 'polls',
+          excludedUserIds: [profile.id],
+        })
+      } catch {
+        showNotice('Опрос создан, но уведомление пока не поставлено в очередь.')
+        return
+      }
       showNotice('Опрос создан')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось создать опрос')
@@ -226,6 +270,18 @@ function App() {
 
     try {
       await closePollRequest(db, profile, poll)
+      try {
+        await enqueueBroadcastNotification(db, {
+          title: 'Опрос закрыт',
+          body: poll.title,
+          destination: 'polls',
+          category: 'polls',
+          excludedUserIds: [profile.id],
+        })
+      } catch {
+        showNotice('Опрос закрыт, но уведомление пока не поставлено в очередь.')
+        return
+      }
       showNotice('Опрос закрыт')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось закрыть опрос')
@@ -237,6 +293,18 @@ function App() {
 
     try {
       await closeChargeRequest(db, profile, event)
+      try {
+        await enqueueBroadcastNotification(db, {
+          title: 'Сбор закрыт',
+          body: event.title,
+          destination: 'events',
+          category: 'events',
+          excludedUserIds: [profile.id],
+        })
+      } catch {
+        showNotice('Сбор закрыт, но уведомление пока не поставлено в очередь.')
+        return
+      }
       showNotice('Сбор закрыт')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось закрыть сбор')
@@ -280,6 +348,18 @@ function App() {
 
     try {
       await createPaymentRequestRequest(db, profile, amount, selectedEvents, purpose)
+      try {
+        await enqueueTargetedNotification(db, {
+          title: 'Новая заявка на оплату',
+          body: `${profile.fullName}: ${amount} ₽`,
+          destination: 'owners',
+          category: 'payments',
+          targetUserIds: staffUserIds,
+        })
+      } catch {
+        showNotice('Заявка на оплату отправлена, но уведомление staff пока не поставлено в очередь.')
+        return
+      }
       showNotice('Заявка на оплату отправлена')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось отправить заявку на оплату')
@@ -330,11 +410,11 @@ function App() {
   }
 
   const deleteUser = async (user: RemoteUser) => {
-    if (!auth || !db || !profile) return
+    if (!db || !profile) return
     if (!window.confirm(`Удалить пользователя ${user.fullName}?`)) return
     if (!window.confirm('Пользователь потеряет доступ к приложению и веб-версии. Продолжить?')) return
     try {
-      await deleteUserRecord(auth, user)
+      await deleteUserRecord(db, profile, user)
       showNotice('Пользователь удален')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось удалить пользователя')
@@ -345,6 +425,18 @@ function App() {
     if (!db || !profile) return
     try {
       await approveRegistrationRequestAction(db, profile, request)
+      try {
+        await enqueueTargetedNotification(db, {
+          title: 'Регистрация одобрена',
+          body: 'Ваша заявка одобрена. Теперь можно войти в систему.',
+          destination: 'auth',
+          category: 'registration',
+          targetUserIds: [request.id],
+        })
+      } catch {
+        showNotice('Регистрация одобрена, но уведомление пользователю пока не поставлено в очередь.')
+        return
+      }
       showNotice('Регистрация одобрена')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось одобрить регистрацию')
@@ -355,6 +447,20 @@ function App() {
     if (!db || !profile) return
     try {
       await rejectRegistrationRequestAction(db, profile, request, reason)
+      try {
+        await enqueueTargetedNotification(db, {
+          title: 'Регистрация отклонена',
+          body: reason.trim()
+            ? `Ваша заявка отклонена. Причина: ${reason.trim()}`
+            : 'Ваша заявка отклонена. Подробности можно уточнить у администрации.',
+          destination: 'auth',
+          category: 'registration',
+          targetUserIds: [request.id],
+        })
+      } catch {
+        showNotice('Регистрация отклонена, но уведомление пользователю пока не поставлено в очередь.')
+        return
+      }
       showNotice('Регистрация отклонена')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось отклонить регистрацию')
@@ -365,6 +471,18 @@ function App() {
     if (!db || !profile) return
     try {
       await confirmPaymentRequestAction(db, profile, request.id)
+      try {
+        await enqueueTargetedNotification(db, {
+          title: 'Оплата подтверждена',
+          body: `Платеж на сумму ${request.amount} ₽ подтвержден.`,
+          destination: 'payments',
+          category: 'payments',
+          targetUserIds: [request.userId],
+        })
+      } catch {
+        showNotice('Оплата подтверждена, но уведомление пользователю пока не поставлено в очередь.')
+        return
+      }
       showNotice('Оплата подтверждена')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось подтвердить оплату')
@@ -375,6 +493,20 @@ function App() {
     if (!db || !profile) return
     try {
       await rejectPaymentRequestAction(db, profile, request.id, reason)
+      try {
+        await enqueueTargetedNotification(db, {
+          title: 'Оплата отклонена',
+          body: reason.trim()
+            ? `Платеж на сумму ${request.amount} ₽ отклонен. Причина: ${reason.trim()}`
+            : `Платеж на сумму ${request.amount} ₽ отклонен.`,
+          destination: 'payments',
+          category: 'payments',
+          targetUserIds: [request.userId],
+        })
+      } catch {
+        showNotice('Оплата отклонена, но уведомление пользователю пока не поставлено в очередь.')
+        return
+      }
       showNotice('Оплата отклонена')
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'Не удалось отклонить оплату')

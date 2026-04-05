@@ -15,11 +15,13 @@ import { humanizeError, isValidRussianPhoneInput, normalizeAuthEmail, parsePlots
 const PENDING_REGISTRATION_MESSAGE =
   'Заявка уже передана модераторам. Дождитесь одобрения и попробуйте войти снова.'
 const SUBMITTED_REGISTRATION_MESSAGE =
-  'Заявка передана модераторам. Дождитесь одобрения, после этого вы сможете войти.'
+  'Заявка передана модераторам. После одобрения вы сможете войти в систему.'
 const REJECTED_REGISTRATION_FALLBACK =
   'Заявка на регистрацию была отклонена. Обратитесь к модератору или администратору.'
 const REGISTRATION_REQUIRED_MESSAGE =
   'Для входа сначала нужно отправить заявку на регистрацию.'
+const PROFILE_MISSING_MESSAGE =
+  'Профиль не найден. Если доступ был отозван, обратитесь к модератору или администратору.'
 
 export function useResidentAuth() {
   const [authMode, setAuthMode] = useState<AuthMode>('login')
@@ -44,28 +46,35 @@ export function useResidentAuth() {
     setRegisterToken('')
   }, [])
 
-  const updateAuthField = useCallback((field: keyof AuthFormState, value: string) => {
-    setAuthForm((current) => {
-      const next = { ...current, [field]: value }
-      if (field === 'login' && value.trim() !== verificationSentTo) {
-        setVerificationSentTo('')
-        setVerificationApprovedFor('')
-        setRegisterToken('')
-      }
-      return next
-    })
-  }, [verificationSentTo])
+  const updateAuthField = useCallback(
+    (field: keyof AuthFormState, value: string) => {
+      setAuthForm((current) => {
+        const next = { ...current, [field]: value }
+        if (field === 'login' && value.trim().toLowerCase() !== verificationSentTo) {
+          setVerificationSentTo('')
+          setVerificationApprovedFor('')
+          setRegisterToken('')
+        }
+        return next
+      })
+    },
+    [verificationSentTo],
+  )
 
-  const switchAuthMode = useCallback((mode: AuthMode) => {
-    setAuthMode(mode)
-    clearAuthMessages()
-    if (mode === 'register') {
-      resetVerificationState()
-    }
-  }, [clearAuthMessages, resetVerificationState])
+  const switchAuthMode = useCallback(
+    (mode: AuthMode) => {
+      setAuthMode(mode)
+      clearAuthMessages()
+      if (mode === 'register') {
+        resetVerificationState()
+      }
+    },
+    [clearAuthMessages, resetVerificationState],
+  )
 
   const registrationEmail = useMemo(() => authForm.login.trim().toLowerCase(), [authForm.login])
-  const isRegistrationEmailVerified = registrationEmail !== '' && verificationApprovedFor === registrationEmail && !!registerToken
+  const isRegistrationEmailVerified =
+    registrationEmail !== '' && verificationApprovedFor === registrationEmail && !!registerToken
 
   const handleMissingProfileAccess = useCallback(async (userId: string) => {
     if (!db || !auth) return
@@ -82,6 +91,9 @@ export function useResidentAuth() {
     } else if (requestStatus === 'REJECTED') {
       setAuthSuccess('')
       setAuthError(reviewReason ? `Заявка отклонена. Причина: ${reviewReason}` : REJECTED_REGISTRATION_FALLBACK)
+    } else if (auth.currentUser?.emailVerified) {
+      setAuthSuccess('')
+      setAuthError(PROFILE_MISSING_MESSAGE)
     } else {
       setAuthSuccess('')
       setAuthError(REGISTRATION_REQUIRED_MESSAGE)
@@ -113,13 +125,10 @@ export function useResidentAuth() {
       return 'Укажите хотя бы один участок.'
     }
     if (!verificationSentTo || verificationSentTo !== registrationEmail) {
-      return 'Сначала запросите код подтверждения на почту.'
-    }
-    if (!authForm.verificationCode.trim()) {
-      return 'Введите код подтверждения из письма.'
+      return 'Сначала отправьте письмо для подтверждения электронной почты.'
     }
     if (!isRegistrationEmailVerified) {
-      return 'Сначала подтвердите код из письма.'
+      return 'Сначала подтвердите электронную почту по ссылке из письма.'
     }
     return ''
   }, [authForm, isRegistrationEmailVerified, registrationEmail, verificationSentTo])
@@ -134,11 +143,11 @@ export function useResidentAuth() {
 
     setVerificationSending(true)
     try {
-      await requestRegistrationEmailCode(authForm.login.trim())
+      await requestRegistrationEmailCode(authForm.login.trim(), authForm.password)
       setVerificationSentTo(registrationEmail)
       setVerificationApprovedFor('')
       setRegisterToken('')
-      setAuthSuccess('Код подтверждения отправлен на указанную электронную почту.')
+      setAuthSuccess('Письмо для подтверждения отправлено на указанную электронную почту.')
     } catch (error) {
       setAuthError(humanizeError(error))
     } finally {
@@ -150,17 +159,13 @@ export function useResidentAuth() {
     clearAuthMessages()
 
     if (!verificationSentTo || verificationSentTo !== registrationEmail) {
-      setAuthError('Сначала запросите код подтверждения.')
-      return
-    }
-    if (!/^\d{6}$/.test(authForm.verificationCode.trim())) {
-      setAuthError('Код подтверждения должен содержать 6 цифр.')
+      setAuthError('Сначала отправьте письмо для подтверждения.')
       return
     }
 
     setVerificationChecking(true)
     try {
-      const result = await verifyRegistrationEmailCode(authForm.login.trim(), authForm.verificationCode.trim())
+      const result = await verifyRegistrationEmailCode(authForm.login.trim(), authForm.password)
       setVerificationApprovedFor(registrationEmail)
       setRegisterToken(result.registerToken)
       setAuthSuccess('Электронная почта подтверждена. Теперь можно отправить заявку.')
@@ -169,72 +174,74 @@ export function useResidentAuth() {
     } finally {
       setVerificationChecking(false)
     }
-  }, [authForm.login, authForm.verificationCode, clearAuthMessages, registrationEmail, verificationSentTo])
+  }, [authForm.login, authForm.password, clearAuthMessages, registrationEmail, verificationSentTo])
 
-  const handleAuthSubmit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!firebaseSetup.ready || !auth || !db || authSubmitting) return
+  const handleAuthSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (!firebaseSetup.ready || !auth || !db || authSubmitting) return
 
-    clearAuthMessages()
+      clearAuthMessages()
 
-    if (!authForm.login.trim()) {
-      setAuthError(authMode === 'register' ? 'Укажите электронную почту.' : 'Введите логин или почту.')
-      return
-    }
-    if (!authForm.password.trim()) {
-      setAuthError('Введите пароль.')
-      return
-    }
-
-    if (authMode === 'register') {
-      const validationError = validateRegistrationForm()
-      if (validationError) {
-        setAuthError(validationError)
+      if (!authForm.login.trim()) {
+        setAuthError(authMode === 'register' ? 'Укажите электронную почту.' : 'Введите логин или почту.')
         return
       }
-    }
+      if (!authForm.password.trim()) {
+        setAuthError('Введите пароль.')
+        return
+      }
 
-    setAuthSubmitting(true)
-
-    try {
-      if (authMode === 'login') {
-        const credential = await signInWithEmailAndPassword(
-          auth,
-          normalizeAuthEmail(authForm.login.trim()),
-          authForm.password,
-        )
-        const profileSnapshot = await getDoc(doc(db, 'users', credential.user.uid))
-        if (!profileSnapshot.exists()) {
-          await handleMissingProfileAccess(credential.user.uid)
+      if (authMode === 'register') {
+        const validationError = validateRegistrationForm()
+        if (validationError) {
+          setAuthError(validationError)
           return
         }
-        setAuthForm((current) => ({ ...current, password: '' }))
-      } else {
-        await submitVerifiedRegistration(authForm, registerToken)
-        setAuthMode('login')
-        setAuthForm({
-          ...INITIAL_AUTH_FORM,
-          login: authForm.login.trim(),
-        })
-        resetVerificationState()
-        setAuthSuccess(SUBMITTED_REGISTRATION_MESSAGE)
       }
-    } catch (error) {
-      setAuthError(humanizeError(error))
-    } finally {
-      setAuthSubmitting(false)
-    }
-  }, [
-    authForm,
-    authMode,
-    authSubmitting,
-    clearAuthMessages,
-    db,
-    handleMissingProfileAccess,
-    registerToken,
-    resetVerificationState,
-    validateRegistrationForm,
-  ])
+
+      setAuthSubmitting(true)
+
+      try {
+        if (authMode === 'login') {
+          const credential = await signInWithEmailAndPassword(
+            auth,
+            normalizeAuthEmail(authForm.login.trim()),
+            authForm.password,
+          )
+          const profileSnapshot = await getDoc(doc(db, 'users', credential.user.uid))
+          if (!profileSnapshot.exists()) {
+            await handleMissingProfileAccess(credential.user.uid)
+            return
+          }
+          setAuthForm((current) => ({ ...current, password: '' }))
+        } else {
+          await submitVerifiedRegistration(authForm, registerToken)
+          setAuthMode('login')
+          setAuthForm({
+            ...INITIAL_AUTH_FORM,
+            login: authForm.login.trim(),
+          })
+          resetVerificationState()
+          setAuthSuccess(SUBMITTED_REGISTRATION_MESSAGE)
+        }
+      } catch (error) {
+        setAuthError(humanizeError(error))
+      } finally {
+        setAuthSubmitting(false)
+      }
+    },
+    [
+      authForm,
+      authMode,
+      authSubmitting,
+      clearAuthMessages,
+      handleMissingProfileAccess,
+      registerToken,
+      resetVerificationState,
+      validateRegistrationForm,
+    ],
+  )
 
   return {
     authMode,

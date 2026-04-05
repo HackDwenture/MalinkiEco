@@ -52,8 +52,8 @@ export function AuthScreen({
             <h1>Веб-доступ для собственников</h1>
             <p className="hero-copy">
               Веб-версия предоставляет доступ к основным разделам системы: объявлениям, общему чату,
-              опросам, разделу оплаты и списку собственников. Сервис рассчитан на работу с iPhone,
-              iPad и компьютеров.
+              опросам, оплате и списку собственников. Сервис рассчитан на работу с iPhone, iPad и
+              компьютеров.
             </p>
             <ul className="feature-list">
               <li>Объявления и события поселка</li>
@@ -102,15 +102,15 @@ export function AuthScreen({
                       placeholder="Например, owner@example.com"
                       autoComplete="email"
                     />
-                    <small>На этот адрес будет отправлен код подтверждения.</small>
+                    <small>На этот адрес будет отправлено письмо для подтверждения электронной почты.</small>
                   </label>
 
                   <label>
-                    Псевдоним (отображаемое имя)
+                    Отображаемое имя
                     <input
                       value={form.fullName}
                       onChange={(event) => onFieldChange('fullName', event.target.value)}
-                      placeholder="Иванов"
+                      placeholder="Иван Иванов"
                       autoComplete="name"
                     />
                   </label>
@@ -168,6 +168,11 @@ export function AuthScreen({
                     {emailVerified && <span className="verification-chip is-success">Почта подтверждена</span>}
                   </div>
 
+                  <p className="verification-box__text">
+                    Сначала отправьте письмо, затем подтвердите адрес по ссылке из письма и вернитесь сюда
+                    для проверки статуса.
+                  </p>
+
                   <div className="verification-actions">
                     <button
                       className="ghost-button"
@@ -175,24 +180,16 @@ export function AuthScreen({
                       onClick={onRequestCode}
                       disabled={verificationSending}
                     >
-                      {verificationSending ? 'Отправляем код...' : 'Получить код'}
+                      {verificationSending ? 'Отправляем письмо...' : 'Отправить письмо'}
                     </button>
                   </div>
 
                   {verificationSentTo && (
                     <>
-                      <label>
-                        Код подтверждения
-                        <input
-                          value={form.verificationCode}
-                          onChange={(event) =>
-                            onFieldChange('verificationCode', event.target.value.replace(/\D/g, '').slice(0, 6))
-                          }
-                          placeholder="6 цифр из письма"
-                          inputMode="numeric"
-                          autoComplete="one-time-code"
-                        />
-                      </label>
+                      <small className="verification-box__hint">
+                        Письмо отправлено на {verificationSentTo}. После подтверждения адреса нажмите кнопку
+                        ниже.
+                      </small>
 
                       <div className="verification-actions">
                         <button
@@ -202,10 +199,10 @@ export function AuthScreen({
                           disabled={verificationChecking || emailVerified}
                         >
                           {verificationChecking
-                            ? 'Проверяем код...'
+                            ? 'Проверяем почту...'
                             : emailVerified
-                              ? 'Код подтвержден'
-                              : 'Подтвердить код'}
+                              ? 'Почта подтверждена'
+                              : 'Проверить почту'}
                         </button>
                       </div>
                     </>
