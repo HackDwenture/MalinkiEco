@@ -100,6 +100,12 @@
   box-shadow: inset 0 0 0 1px rgba(255, 206, 112, 0.24);
 }
 
+.resident-chat__bubble.is-mentioned {
+  box-shadow:
+    inset 0 0 0 1px rgba(117, 176, 255, 0.28),
+    0 10px 24px rgba(68, 134, 255, 0.08);
+}
+
 .resident-chat__meta {
   display: flex;
   align-items: center;
@@ -178,6 +184,11 @@
   line-height: 1;
 }
 
+.resident-chat__flag.is-mention {
+  background: rgba(117, 176, 255, 0.14);
+  color: #cde2ff;
+}
+
 .resident-chat__ticks {
   min-width: 1.5rem;
   text-align: right;
@@ -214,9 +225,75 @@
   gap: 12px;
 }
 
+.resident-chat__compose-box {
+  position: relative;
+}
+
 .resident-chat__compose textarea {
   min-height: 96px;
   resize: vertical;
+}
+
+.resident-chat__compose-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resident-chat__hint {
+  color: rgba(228, 237, 247, 0.68);
+  font-size: 0.88rem;
+}
+
+.resident-chat__mention-picker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(9, 21, 36, 0.98);
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.resident-chat__mention-option {
+  display: grid;
+  gap: 4px;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4f8ff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.resident-chat__mention-option strong {
+  color: #fff;
+}
+
+.resident-chat__mention-option span {
+  color: rgba(228, 237, 247, 0.68);
+  font-size: 0.88rem;
+}
+
+.resident-chat__mention-option:hover,
+.resident-chat__mention-option.is-selected {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.resident-chat__mention-empty {
+  padding: 8px 10px;
+  color: rgba(228, 237, 247, 0.72);
 }
 
 .resident-chat__replying {
@@ -286,7 +363,8 @@
 
 @media (max-width: 640px) {
   .resident-chat__replying,
-  .resident-chat__edit-actions {
+  .resident-chat__edit-actions,
+  .resident-chat__compose-actions {
     flex-direction: column;
     align-items: stretch;
   }

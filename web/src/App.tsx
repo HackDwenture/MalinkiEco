@@ -276,19 +276,31 @@ function App() {
     await markChatReadRequest(db, profile.id, latestSeen, profile.lastChatReadAt)
   }
 
-  const sendChatMessage = async (text: string, replyTo: ChatMessage | null) => {
+  const sendChatMessage = async (text: string, replyTo: ChatMessage | null, mentionedUserIds: string[] = []) => {
     if (!db || !profile) return
 
     try {
-      await sendChatMessageRequest(db, profile, text, replyTo)
+      const cleanMentionedUserIds = Array.from(new Set(mentionedUserIds.filter((item) => item && item !== profile.id)))
+
+      await sendChatMessageRequest(db, profile, text, replyTo, cleanMentionedUserIds)
       try {
         await enqueueBroadcastNotification(db, {
           title: 'Новое сообщение в чате',
           body: `${profile.fullName}: ${text.trim()}`,
           destination: 'chat',
           category: 'chat',
-          excludedUserIds: [profile.id],
+          excludedUserIds: [profile.id, ...cleanMentionedUserIds],
         })
+
+        if (cleanMentionedUserIds.length > 0) {
+          await enqueueTargetedNotification(db, {
+            title: 'Вас отметили в чате',
+            body: `${profile.fullName} упомянул вас: ${text.trim()}`,
+            destination: 'chat',
+            category: 'mention',
+            targetUserIds: cleanMentionedUserIds,
+          })
+        }
       } catch {
         showNotice('Сообщение отправлено, но push-уведомление пока не поставлено в очередь.')
       }
@@ -938,6 +950,7 @@ function App() {
         {activeTab === 'chat' && (
           <ResidentChat
             profile={profile}
+            users={owners}
             messages={chatMessages}
             readerCutoff={chatReaderCutoff}
             onSend={sendChatMessage}

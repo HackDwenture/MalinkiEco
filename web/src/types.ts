@@ -45,6 +45,7 @@ export type ChatMessage = {
   replyToSenderName: string
   replyToSenderPlotName: string
   replyToText: string
+  mentionedUserIds: string[]
   isPinned: boolean
   pinnedAtClient: number
   createdAtClient: number

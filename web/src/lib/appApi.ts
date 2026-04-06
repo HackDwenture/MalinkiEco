@@ -301,7 +301,13 @@ export async function markChatRead(db: Firestore, userId: string, latestSeen: nu
   await updateDoc(doc(db, 'users', userId), { lastChatReadAt: latestSeen })
 }
 
-export async function sendChatMessage(db: Firestore, profile: RemoteUser, text: string, replyTo: ChatMessage | null) {
+export async function sendChatMessage(
+  db: Firestore,
+  profile: RemoteUser,
+  text: string,
+  replyTo: ChatMessage | null,
+  mentionedUserIds: string[] = [],
+) {
   const normalizedText = text.trim()
   if (!normalizedText) return
 
@@ -314,7 +320,7 @@ export async function sendChatMessage(db: Firestore, profile: RemoteUser, text: 
     replyToSenderName: replyTo?.senderName ?? '',
     replyToSenderPlotName: replyTo?.senderPlotName ?? '',
     replyToText: replyTo?.text ?? '',
-    mentionedUserIds: [],
+    mentionedUserIds: Array.from(new Set(mentionedUserIds.map((item) => item.trim()).filter(Boolean))),
     isPinned: false,
     pinnedByUserId: '',
     pinnedByUserName: '',

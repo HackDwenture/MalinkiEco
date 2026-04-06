@@ -79,6 +79,7 @@ export function useResidentData(profile: RemoteUser | null) {
           replyToSenderName: String(data.replyToSenderName ?? ''),
           replyToSenderPlotName: String(data.replyToSenderPlotName ?? ''),
           replyToText: String(data.replyToText ?? ''),
+          mentionedUserIds: Array.isArray(data.mentionedUserIds) ? data.mentionedUserIds.map(String).filter(Boolean) : [],
           isPinned: Boolean(data.isPinned ?? false),
           pinnedAtClient: Number(data.pinnedAtClient ?? 0),
           createdAtClient: extractCreatedAt(data.createdAt, data.createdAtClient),
