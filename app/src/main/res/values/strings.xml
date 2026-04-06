@@ -1,4 +1,4 @@
-<resources>
+﻿<resources>
     <string name="app_name">MalinkiEco</string>
     <string name="tagline">Поселок, платежи, события и общий чат в одном приложении</string>
     <string name="app_version_label">v2.2b</string>
@@ -217,18 +217,35 @@
     <string name="registration_choose_plots">Выбрать участки</string>
     <string name="registration_plots_empty">Участки пока не выбраны</string>
     <string name="registration_plots_selected">Выбрано: %1$s</string>
+    <string name="registration_verification_intro">Сначала подтвердите почту кодом из письма.</string>
+    <string name="registration_send_code">Отправить код</string>
+    <string name="registration_code_hint">Код из письма</string>
+    <string name="registration_verify_code">Подтвердить код</string>
+    <string name="registration_code_required">Введите 6 цифр из письма</string>
+    <string name="registration_code_sent">Код отправлен на почту. Введите его ниже и подтвердите адрес.</string>
+    <string name="registration_code_verified">Почта подтверждена. Теперь можно отправить заявку модераторам.</string>
+    <string name="registration_code_send_failed">Не удалось отправить код: %1$s</string>
+    <string name="registration_code_verify_failed">Не удалось подтвердить код: %1$s</string>
+    <string name="registration_verify_email_first">Сначала подтвердите электронную почту кодом из письма</string>
+    <string name="registration_verify_email_after_login_message">Для завершения регистрации сначала подтвердите электронную почту кодом из письма.</string>
+    <string name="registration_finish_request_after_verification_message">Почта уже подтверждена. Вернитесь в форму регистрации и отправьте заявку модераторам.</string>
     <string name="registration_submit">Отправить заявку</string>
     <string name="registration_form_invalid">Заполните почту, псевдоним, телефон, пароль и выберите хотя бы один участок</string>
     <string name="registration_request_sent">Заявка отправлена. Теперь дождитесь одобрения администратора или модератора.</string>
+    <string name="registration_request_sent_title">Заявка отправлена</string>
+    <string name="registration_request_sent_message">Ваша заявка успешно отправлена администратору или модератору. Пока она не будет одобрена, вход в приложение недоступен.</string>
     <string name="registration_request_send_failed">Не удалось отправить заявку: %1$s</string>
     <string name="registration_pending_message">Ваша заявка еще не одобрена. Дождитесь подтверждения.</string>
     <string name="registration_rejected_message">Заявка отклонена. Причина: %1$s</string>
+    <string name="registration_request_rejected_title">Заявка отклонена</string>
     <string name="registration_request_reason_empty">не указана</string>
     <string name="registration_requests_title">Заявки на регистрацию</string>
     <string name="registration_requests_empty">Новых заявок на регистрацию пока нет.</string>
     <string name="registration_requests_load_failed">Не удалось загрузить заявки на регистрацию</string>
     <string name="registration_request_title">%1$s • почта %2$s</string>
     <string name="registration_request_meta">Участки: %1$s • %2$s</string>
+    <string name="registration_request_verifying">Ожидает подтверждения почты</string>
+    <string name="registration_request_verified">Почта подтверждена</string>
     <string name="registration_request_pending">Ожидает одобрения</string>
     <string name="registration_request_approved">Одобрил: %1$s</string>
     <string name="registration_request_rejected">Отклонил: %1$s</string>

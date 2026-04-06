@@ -57,6 +57,8 @@ class RegistrationRequestAdapter(
             )
             phone.visibility = if (request.phone.isBlank()) View.GONE else View.VISIBLE
             status.text = when (request.status) {
+                RegistrationRequestStatus.VERIFYING -> itemView.context.getString(R.string.registration_request_verifying)
+                RegistrationRequestStatus.VERIFIED -> itemView.context.getString(R.string.registration_request_verified)
                 RegistrationRequestStatus.PENDING -> itemView.context.getString(R.string.registration_request_pending)
                 RegistrationRequestStatus.APPROVED -> itemView.context.getString(
                     R.string.registration_request_approved,

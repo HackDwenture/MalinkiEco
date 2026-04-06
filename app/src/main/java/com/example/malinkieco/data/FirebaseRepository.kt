@@ -7,6 +7,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -15,6 +16,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import com.example.malinkieco.util.PhoneFormatUtils
 import java.security.MessageDigest
+import kotlinx.coroutines.delay
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -24,6 +26,10 @@ class FirebaseRepository(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore
 ) {
+    data class RegistrationEmailCodeVerificationResult(
+        val registerToken: String
+    )
+
     data class RegistrationSubmissionResult(
         val requestId: String,
         val idToken: String?,
@@ -40,6 +46,9 @@ class FirebaseRepository(
     private val auditLogs = firestore.collection(AUDIT_LOGS_COLLECTION)
     private val userDevices = firestore.collection(USER_DEVICES_COLLECTION)
     private val notificationJobs = firestore.collection(NOTIFICATION_JOBS_COLLECTION)
+    private val registrationApp by lazy { resolveRegistrationApp() }
+    private val registrationAuth by lazy { FirebaseAuth.getInstance(registrationApp) }
+    private val registrationFirestore by lazy { FirebaseFirestore.getInstance(registrationApp) }
 
     fun currentAuthUser(): FirebaseUser? = auth.currentUser
 
@@ -198,11 +207,206 @@ class FirebaseRepository(
     }
 
     suspend fun getStaffUserIds(): List<String> {
-        val snapshot = users
-            .whereIn("role", listOf(Role.ADMIN.name, Role.MODERATOR.name))
-            .get()
-            .await()
-        return snapshot.documents.map { it.id }.distinct()
+        return getStaffUserIds(users)
+    }
+
+    suspend fun requestRegistrationEmailCode(email: String, password: String) {
+        val normalizedEmail = normalizeAuthEmail(email)
+        require(password.trim().length >= 6) { "Пароль должен быть не короче 6 символов." }
+
+        val credential = ensureRegistrationUser(normalizedEmail, password)
+        val user = credential.user ?: error("Пользователь регистрации не был создан")
+        try {
+            syncRegistrationSession(user.uid)
+            val state = withRegistrationFirestoreRetry(user.uid) {
+                readRegistrationState(registrationFirestore, user.uid)
+            }
+
+            if (state.hasProfile) {
+                throw IllegalStateException("Аккаунт уже одобрен. Используйте вход.")
+            }
+            if (state.requestStatus == RegistrationRequestStatus.PENDING.name) {
+                throw IllegalStateException("Заявка уже передана модераторам. Дождитесь одобрения.")
+            }
+
+            val verificationCode = createVerificationCode()
+            val verificationCodeHash = sha256Hex(verificationCode)
+            val createdAtClient = System.currentTimeMillis()
+
+            withRegistrationFirestoreRetry(user.uid) {
+                registrationFirestore.collection(REGISTRATION_REQUESTS_COLLECTION)
+                    .document(user.uid)
+                    .set(
+                        mapOf(
+                            "login" to normalizedEmail,
+                            "authEmail" to normalizedEmail,
+                            "fullName" to "",
+                            "phone" to "",
+                            "plots" to emptyList<String>(),
+                            "status" to RegistrationRequestStatus.VERIFYING.name,
+                            "verificationCodeHash" to verificationCodeHash,
+                            "verificationExpiresAtClient" to createdAtClient + VERIFICATION_TTL_MS,
+                            "verificationVerifiedAtClient" to 0,
+                            "reviewedById" to "",
+                            "reviewedByName" to "",
+                            "reviewReason" to "",
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "createdAtClient" to createdAtClient
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+            }
+
+            enqueueNotificationJob(
+                collection = registrationFirestore.collection(NOTIFICATION_JOBS_COLLECTION),
+                creatorId = user.uid,
+                audience = "direct_email",
+                title = "Код подтверждения MalinkiEco",
+                body = listOf(
+                    "Здравствуйте!",
+                    "",
+                    "Ваш код подтверждения: $verificationCode",
+                    "",
+                    "Введите этот код в окне регистрации MalinkiEco.",
+                    "Код действует 10 минут."
+                ).joinToString("\n"),
+                destination = "auth",
+                category = "verification",
+                targetUserIds = emptyList(),
+                excludedUserIds = emptyList(),
+                sendEmail = true,
+                sendPush = false,
+                emailTargets = listOf(normalizedEmail)
+            )
+        } finally {
+            registrationAuth.signOut()
+        }
+    }
+
+    suspend fun verifyRegistrationEmailCode(
+        email: String,
+        password: String,
+        verificationCode: String
+    ): RegistrationEmailCodeVerificationResult {
+        val normalizedCode = verificationCode.trim()
+        require(normalizedCode.matches(Regex("^\\d{6}$"))) { "Введите 6 цифр из письма." }
+
+        val credential = registrationAuth.signInWithEmailAndPassword(normalizeAuthEmail(email), password).await()
+        val user = credential.user ?: error("Пользователь регистрации не найден")
+        try {
+            syncRegistrationSession(user.uid)
+            val state = withRegistrationFirestoreRetry(user.uid) {
+                readRegistrationState(registrationFirestore, user.uid)
+            }
+
+            if (state.hasProfile) {
+                throw IllegalStateException("Аккаунт уже одобрен. Используйте вход.")
+            }
+            if (!state.requestExists || state.requestStatus != RegistrationRequestStatus.VERIFYING.name) {
+                throw IllegalStateException("Сначала запросите код подтверждения на электронную почту.")
+            }
+
+            val expiresAtClient = (state.requestData?.getLong("verificationExpiresAtClient") ?: 0L)
+            if (expiresAtClient <= 0L || expiresAtClient < System.currentTimeMillis()) {
+                throw IllegalStateException("Срок действия кода истек. Запросите новый код.")
+            }
+
+            val expectedHash = state.requestData?.getString("verificationCodeHash").orEmpty()
+            val actualHash = sha256Hex(normalizedCode)
+            if (expectedHash.isBlank() || expectedHash != actualHash) {
+                throw IllegalStateException("Неверный код подтверждения. Проверьте письмо и попробуйте снова.")
+            }
+
+            withRegistrationFirestoreRetry(user.uid) {
+                registrationFirestore.collection(REGISTRATION_REQUESTS_COLLECTION)
+                    .document(user.uid)
+                    .update(
+                        mapOf(
+                            "status" to RegistrationRequestStatus.VERIFIED.name,
+                            "verificationCodeHash" to "",
+                            "verificationVerifiedAtClient" to System.currentTimeMillis()
+                        )
+                    )
+                    .await()
+            }
+
+            return RegistrationEmailCodeVerificationResult(registerToken = user.uid)
+        } finally {
+            registrationAuth.signOut()
+        }
+    }
+
+    suspend fun submitVerifiedRegistrationRequest(
+        email: String,
+        password: String,
+        fullName: String,
+        phone: String,
+        plots: List<String>,
+        registerToken: String
+    ): RegistrationSubmissionResult {
+        val normalizedEmail = normalizeAuthEmail(email)
+        val normalizedPhone = PhoneFormatUtils.normalizeRussianPhone(phone.trim())
+        val normalizedPlots = plots.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        require(fullName.trim().isNotEmpty()) { "Введите отображаемое имя." }
+        require(normalizedPhone.length == 11 && normalizedPhone.startsWith("8")) { "Номер телефона должен содержать 10 цифр после 8." }
+        require(normalizedPlots.isNotEmpty()) { "Укажите хотя бы один участок." }
+
+        val credential = registrationAuth.signInWithEmailAndPassword(normalizedEmail, password).await()
+        val user = credential.user ?: error("Пользователь регистрации не найден")
+        try {
+            syncRegistrationSession(user.uid)
+
+            if (registerToken.isNotBlank() && registerToken != user.uid) {
+                throw IllegalStateException("Подтвердите электронную почту заново и попробуйте еще раз.")
+            }
+
+            val state = withRegistrationFirestoreRetry(user.uid) {
+                readRegistrationState(registrationFirestore, user.uid)
+            }
+
+            if (state.hasProfile) {
+                throw IllegalStateException("Аккаунт уже одобрен. Используйте вход.")
+            }
+            if (state.requestStatus == RegistrationRequestStatus.PENDING.name) {
+                throw IllegalStateException("Заявка уже передана модераторам. Дождитесь одобрения.")
+            }
+            if (state.requestStatus != RegistrationRequestStatus.VERIFIED.name) {
+                throw IllegalStateException("Сначала подтвердите электронную почту кодом из письма.")
+            }
+
+            withRegistrationFirestoreRetry(user.uid) {
+                registrationFirestore.collection(REGISTRATION_REQUESTS_COLLECTION)
+                    .document(user.uid)
+                    .set(
+                        mapOf(
+                            "login" to normalizedEmail,
+                            "authEmail" to normalizedEmail,
+                            "fullName" to fullName.trim(),
+                            "phone" to normalizedPhone,
+                            "plots" to normalizedPlots,
+                            "status" to RegistrationRequestStatus.PENDING.name,
+                            "reviewedById" to "",
+                            "reviewedByName" to "",
+                            "reviewReason" to "",
+                            "verificationCodeHash" to "",
+                            "verificationExpiresAtClient" to 0,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "createdAtClient" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+            }
+
+            return RegistrationSubmissionResult(
+                requestId = user.uid,
+                idToken = user.getIdToken(false).await().token,
+                staffUserIds = getStaffUserIds(registrationFirestore.collection(USERS_COLLECTION))
+            )
+        } finally {
+            registrationAuth.signOut()
+        }
     }
 
     suspend fun getRegistrationRequestForCurrentUser(): RegistrationRequest? {
@@ -529,7 +733,15 @@ class FirebaseRepository(
                     onError(error)
                     return@addSnapshotListener
                 }
-                onChange(snapshot?.documents?.mapNotNull { it.toRegistrationRequest() }.orEmpty())
+                onChange(
+                    snapshot?.documents
+                        ?.mapNotNull { it.toRegistrationRequest() }
+                        ?.filterNot {
+                            it.status == RegistrationRequestStatus.VERIFYING ||
+                                it.status == RegistrationRequestStatus.VERIFIED
+                        }
+                        .orEmpty()
+                )
             }
     }
 
@@ -1183,6 +1395,8 @@ class FirebaseRepository(
     }
 
     private suspend fun enqueueNotificationJob(
+        collection: CollectionReference,
+        creatorId: String,
         audience: String,
         title: String,
         body: String,
@@ -1191,7 +1405,8 @@ class FirebaseRepository(
         targetUserIds: List<String>,
         excludedUserIds: List<String>,
         sendEmail: Boolean,
-        sendPush: Boolean
+        sendPush: Boolean,
+        emailTargets: List<String> = emptyList()
     ) {
         val cleanTitle = title.trim()
         val cleanBody = body.trim()
@@ -1200,7 +1415,7 @@ class FirebaseRepository(
         val createdAtClient = System.currentTimeMillis()
         if (cleanTitle.isBlank() || cleanBody.isBlank() || cleanDestination.isBlank()) return
 
-        notificationJobs.add(
+        collection.add(
             mapOf(
                 "status" to "PENDING",
                 "title" to cleanTitle,
@@ -1210,10 +1425,11 @@ class FirebaseRepository(
                 "category" to cleanCategory,
                 "targetUserIds" to targetUserIds.distinct(),
                 "excludedUserIds" to excludedUserIds.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
+                "emailTargets" to emailTargets.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
                 "sendEmail" to sendEmail,
                 "sendPush" to sendPush,
                 "attempts" to 0,
-                "createdById" to (currentAuthUser()?.uid ?: ""),
+                "createdById" to creatorId,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "createdAtClient" to createdAtClient,
                 "nextAttemptAtClient" to createdAtClient,
@@ -1221,6 +1437,34 @@ class FirebaseRepository(
                 "lastError" to ""
             )
         ).await()
+    }
+
+    private suspend fun enqueueNotificationJob(
+        audience: String,
+        title: String,
+        body: String,
+        destination: String,
+        category: String,
+        targetUserIds: List<String>,
+        excludedUserIds: List<String>,
+        sendEmail: Boolean,
+        sendPush: Boolean,
+        emailTargets: List<String> = emptyList()
+    ) {
+        enqueueNotificationJob(
+            collection = notificationJobs,
+            creatorId = currentAuthUser()?.uid.orEmpty(),
+            audience = audience,
+            title = title,
+            body = body,
+            destination = destination,
+            category = category,
+            targetUserIds = targetUserIds,
+            excludedUserIds = excludedUserIds,
+            sendEmail = sendEmail,
+            sendPush = sendPush,
+            emailTargets = emailTargets
+        )
     }
 
     private fun DocumentSnapshot.toAuditLogEntry(): AuditLogEntry? {
@@ -1369,6 +1613,88 @@ class FirebaseRepository(
         return if (value.contains("@")) value else "$value@malinkieco.local"
     }
 
+    private fun resolveRegistrationApp(): FirebaseApp {
+        FirebaseApp.getApps(context).firstOrNull { it.name == REGISTRATION_APP_NAME }?.let { return it }
+        return FirebaseApp.initializeApp(context, FirebaseApp.getInstance().options, REGISTRATION_APP_NAME)
+            ?: FirebaseApp.getInstance(REGISTRATION_APP_NAME)
+    }
+
+    private suspend fun ensureRegistrationUser(email: String, password: String) =
+        try {
+            registrationAuth.signInWithEmailAndPassword(email, password).await()
+        } catch (signInError: Exception) {
+            val errorCode = signInError.message.orEmpty()
+            val canCreateNewUser =
+                errorCode.contains("auth/invalid-credential", ignoreCase = true) ||
+                    errorCode.contains("auth/invalid-login-credentials", ignoreCase = true) ||
+                    errorCode.contains("auth/user-not-found", ignoreCase = true)
+            if (!canCreateNewUser) throw signInError
+            registrationAuth.createUserWithEmailAndPassword(email, password).await()
+        }
+
+    private suspend fun syncRegistrationSession(expectedUid: String) {
+        val user = registrationAuth.currentUser
+        require(user?.uid == expectedUid) { "Firebase не успел завершить авторизацию для регистрации." }
+        user.getIdToken(true).await()
+        delay(200)
+    }
+
+    private fun isFirestorePermissionError(error: Throwable): Boolean {
+        val message = error.message.orEmpty().lowercase()
+        return message.contains("permission-denied") ||
+            message.contains("missing or insufficient permissions")
+    }
+
+    private suspend fun <T> withRegistrationFirestoreRetry(
+        expectedUid: String,
+        action: suspend () -> T
+    ): T {
+        return try {
+            action()
+        } catch (error: Throwable) {
+            if (!isFirestorePermissionError(error)) throw error
+            syncRegistrationSession(expectedUid)
+            action()
+        }
+    }
+
+    private suspend fun readRegistrationState(
+        store: FirebaseFirestore,
+        userId: String
+    ): RegistrationState {
+        val profileSnapshot = store.collection(USERS_COLLECTION).document(userId).get().await()
+        val requestSnapshot = store.collection(REGISTRATION_REQUESTS_COLLECTION).document(userId).get().await()
+        return RegistrationState(
+            hasProfile = profileSnapshot.exists(),
+            requestExists = requestSnapshot.exists(),
+            requestStatus = requestSnapshot.getString("status").orEmpty(),
+            requestData = requestSnapshot.takeIf { it.exists() }
+        )
+    }
+
+    private suspend fun getStaffUserIds(collection: CollectionReference): List<String> {
+        val snapshot = collection
+            .whereIn("role", listOf(Role.ADMIN.name, Role.MODERATOR.name))
+            .get()
+            .await()
+        return snapshot.documents.map { it.id }.distinct()
+    }
+
+    private fun createVerificationCode(): String =
+        (100000 + kotlin.random.Random.nextInt(900000)).toString()
+
+    private fun sha256Hex(value: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private data class RegistrationState(
+        val hasProfile: Boolean,
+        val requestExists: Boolean,
+        val requestStatus: String,
+        val requestData: DocumentSnapshot?
+    )
+
     private fun deviceTokenDocumentId(userId: String, token: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest("$userId:$token".toByteArray(Charsets.UTF_8))
@@ -1396,6 +1722,8 @@ class FirebaseRepository(
         private const val AUDIT_LOGS_COLLECTION = "audit_logs"
         private const val USER_DEVICES_COLLECTION = "user_devices"
         private const val NOTIFICATION_JOBS_COLLECTION = "notification_jobs"
+        private const val REGISTRATION_APP_NAME = "malinkieco-registration"
+        private const val VERIFICATION_TTL_MS = 10 * 60 * 1000L
     }
 }
 

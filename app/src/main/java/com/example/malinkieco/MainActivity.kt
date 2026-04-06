@@ -1,4 +1,4 @@
-package com.example.malinkieco
+﻿package com.example.malinkieco
 
 import android.Manifest
 import android.content.res.ColorStateList
@@ -870,7 +870,7 @@ class MainActivity : AppCompatActivity() {
                             )
                             val latestVersion = config?.latestVersionName?.trim().orEmpty()
                             if (latestVersion.isNotEmpty()) {
-                                append("\n\n")
+                                append("\\n\\n")
                                 append("Актуальная версия: ")
                                 append(latestVersion)
                             }
@@ -1696,7 +1696,8 @@ class MainActivity : AppCompatActivity() {
                             body = title,
                             destination = "polls",
                             category = "polls",
-                            excludedUserIds = listOf(creator.id)
+                            excludedUserIds = listOf(creator.id),
+                            sendEmail = true
                         )
                     }
                 }
@@ -1824,8 +1825,8 @@ class MainActivity : AppCompatActivity() {
             append(getString(R.string.payment_copy_block_title))
             append('\n')
             append(
-                buildPaymentDetailItems(currentPaymentConfig).joinToString("\n\n") { detail ->
-                    "${detail.label}\n${detail.copyValue}"
+                buildPaymentDetailItems(currentPaymentConfig).joinToString("\\n\\n") { detail ->
+                    "${detail.label}\\n${detail.copyValue}"
                 }
             )
         }
@@ -1976,7 +1977,8 @@ class MainActivity : AppCompatActivity() {
                             title = getString(R.string.push_payment_confirmed_title),
                             body = getString(R.string.push_payment_confirmed_body, request.amount),
                             destination = "events",
-                            category = "payments"
+                            category = "payments",
+                            sendEmail = true
                         )
                     }
                 }
@@ -2016,7 +2018,8 @@ class MainActivity : AppCompatActivity() {
                                 reason.ifBlank { getString(R.string.registration_request_reason_empty) }
                             ),
                             destination = "events",
-                            category = "payments"
+                            category = "payments",
+                            sendEmail = true
                         )
                     }
                 }
@@ -2105,9 +2108,9 @@ class MainActivity : AppCompatActivity() {
             .setTitle(if (isPoll) "Закрыть опрос" else "Закрыть сбор")
             .setMessage(
                 if (isPoll) {
-                    "Опрос \"${event.title}\" будет закрыт и останется в событиях как завершенный."
+                    "Опрос \\\"${event.title}\\\" будет закрыт и останется в событиях как завершенный."
                 } else {
-                    "Сбор \"${event.title}\" будет закрыт. У пользователей он исчезнет из выбора, а в событиях останется как завершенный."
+                    "Сбор \\\"${event.title}\\\" будет закрыт. У пользователей он исчезнет из выбора, а в событиях останется как завершенный."
                 }
             )
             .setPositiveButton(if (isPoll) "Закрыть опрос" else "Закрыть") { _, _ ->
@@ -2121,7 +2124,8 @@ class MainActivity : AppCompatActivity() {
                                     body = event.title,
                                     destination = if (isPoll) "polls" else "events",
                                     category = if (isPoll) "polls" else "events",
-                                    excludedUserIds = listOf(reviewer.id)
+                                    excludedUserIds = listOf(reviewer.id),
+                                    sendEmail = true
                                 )
                             }
                         }
@@ -3046,59 +3050,6 @@ class MainActivity : AppCompatActivity() {
         AppCompatDelegate.setDefaultNightMode(nightMode)
     }
 
-    private fun openRegistrationDialog() {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 0)
-        }
-        val emailInput = EditText(this).apply {
-            hint = getString(R.string.registration_email_hint)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-        }
-        val nameInput = EditText(this).apply { hint = getString(R.string.registration_full_name_hint) }
-        val passwordInput = EditText(this).apply {
-            hint = getString(R.string.registration_password_hint)
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        val plotsLabel = TextView(this).apply {
-            text = getString(R.string.registration_plots_empty)
-            setPadding(0, 24, 0, 16)
-        }
-        val selectedPlots = mutableSetOf<String>()
-        val choosePlotsButton = Button(this).apply {
-            text = getString(R.string.registration_choose_plots)
-            setOnClickListener {
-                openPlotsDialog(selectedPlots) { plots ->
-                    plotsLabel.text = if (plots.isEmpty()) {
-                        getString(R.string.registration_plots_empty)
-                    } else {
-                        getString(R.string.registration_plots_selected, plots.joinToString(", "))
-                    }
-                }
-            }
-        }
-
-        container.addView(emailInput)
-        container.addView(nameInput)
-        container.addView(passwordInput)
-        container.addView(plotsLabel)
-        container.addView(choosePlotsButton)
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.open_registration_button)
-            .setView(container)
-            .setPositiveButton(R.string.registration_submit) { _, _ ->
-                submitRegistration(
-                    login = emailInput.text.toString(),
-                    fullName = nameInput.text.toString(),
-                    password = passwordInput.text.toString(),
-                    plots = selectedPlots.toList()
-                )
-            }
-            .setNegativeButton(R.string.dialog_cancel, null)
-            .show()
-    }
-
     private fun openPlotsDialog(selectedPlots: MutableSet<String>, onChanged: (Set<String>) -> Unit) {
         val options = PLOT_OPTIONS
         val checked = options.map { selectedPlots.contains(it) }.toBooleanArray()
@@ -3116,62 +3067,28 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun submitRegistration(login: String, fullName: String, password: String, plots: List<String>) {
-        if (login.isBlank() || fullName.isBlank() || password.isBlank() || plots.isEmpty()) {
-            toast(getString(R.string.registration_form_invalid))
-            return
-        }
-        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(login.trim()).matches()) {
-            toast("Введите корректную почту")
-            return
-        }
-
-        lifecycleScope.launch {
-            try {
-                val submission = withContext(Dispatchers.IO) {
-                    repository.submitRegistrationRequest(
-                        login = login.trim(),
-                        password = password,
-                        fullName = fullName.trim(),
-                        phone = "",
-                        plots = plots
-                    )
-                }
-                if (submission.staffUserIds.isNotEmpty()) {
-                    runCatching {
-                        repository.enqueueTargetedNotificationJob(
-                            userIds = submission.staffUserIds,
-                            getString(R.string.push_registration_request_created_title),
-                            getString(R.string.push_registration_request_created_body, fullName.trim(), plots.joinToString(", ")),
-                            destination = "residents",
-                            category = "registration_requests",
-                            sendEmail = false,
-                            sendPush = true
-                        )
-                    }
-                }
-                repository.logout()
-                showRegistrationPendingDialog()
-            } catch (error: Exception) {
-                repository.logout()
-                toast(getString(R.string.registration_request_send_failed, humanReadableRegistrationError(error)))
-            }
-        }
-    }
-
     private fun showRegistrationFormDialog() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_registration, null)
         val emailLayout = dialogView.findViewById<TextInputLayout>(R.id.tilRegistrationEmail)
         val displayNameLayout = dialogView.findViewById<TextInputLayout>(R.id.tilRegistrationDisplayName)
         val phoneLayout = dialogView.findViewById<TextInputLayout>(R.id.tilRegistrationPhone)
         val passwordLayout = dialogView.findViewById<TextInputLayout>(R.id.tilRegistrationPassword)
+        val codeLayout = dialogView.findViewById<TextInputLayout>(R.id.tilRegistrationCode)
         val emailInput = dialogView.findViewById<EditText>(R.id.etRegistrationEmail)
         val displayNameInput = dialogView.findViewById<EditText>(R.id.etRegistrationDisplayName)
         val phoneInput = dialogView.findViewById<EditText>(R.id.etRegistrationPhone)
         val passwordInput = dialogView.findViewById<EditText>(R.id.etRegistrationPassword)
+        val codeInput = dialogView.findViewById<EditText>(R.id.etRegistrationCode)
+        val verificationStatusView = dialogView.findViewById<TextView>(R.id.tvRegistrationVerificationStatus)
+        val sendCodeButton = dialogView.findViewById<Button>(R.id.btnRegistrationSendCode)
+        val verifyCodeButton = dialogView.findViewById<Button>(R.id.btnRegistrationVerifyCode)
         val plotsLabel = dialogView.findViewById<TextView>(R.id.tvRegistrationPlots)
         val choosePlotsButton = dialogView.findViewById<Button>(R.id.btnRegistrationPlots)
         val selectedPlots = mutableSetOf<String>()
+        var requestedEmail = ""
+        var requestedPassword = ""
+        var registerToken = ""
+        var emailVerified = false
 
         choosePlotsButton.setOnClickListener {
             openPlotsDialog(selectedPlots) { plots ->
@@ -3190,12 +3107,129 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(R.string.dialog_cancel, null)
             .create()
 
+        fun syncVerificationUi() {
+            val codeRequested = requestedEmail.isNotBlank()
+            codeLayout.isEnabled = codeRequested
+            codeInput.isEnabled = codeRequested
+            verifyCodeButton.isEnabled = codeRequested
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = emailVerified
+        }
+
+        fun resetVerificationState() {
+            requestedEmail = ""
+            requestedPassword = ""
+            registerToken = ""
+            emailVerified = false
+            codeLayout.error = null
+            codeInput.text?.clear()
+            verificationStatusView.text = getString(R.string.registration_verification_intro)
+            syncVerificationUi()
+        }
+
+        val credentialsWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+            override fun afterTextChanged(s: Editable?) {
+                val currentEmail = emailInput.text?.toString()?.trim().orEmpty()
+                val currentPassword = passwordInput.text?.toString().orEmpty()
+                if ((requestedEmail.isNotBlank() || emailVerified) &&
+                    (currentEmail != requestedEmail || currentPassword != requestedPassword)
+                ) {
+                    resetVerificationState()
+                }
+            }
+        }
+        emailInput.addTextChangedListener(credentialsWatcher)
+        passwordInput.addTextChangedListener(credentialsWatcher)
+
+        sendCodeButton.setOnClickListener {
+            emailLayout.error = null
+            passwordLayout.error = null
+            codeLayout.error = null
+
+            val email = emailInput.text.toString().trim()
+            val password = passwordInput.text.toString()
+            var valid = true
+
+            if (email.isBlank()) {
+                emailLayout.error = getString(R.string.validation_email_required)
+                valid = false
+            } else if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+                emailLayout.error = getString(R.string.validation_email_invalid)
+                valid = false
+            }
+            if (password.length < 6) {
+                passwordLayout.error = getString(R.string.validation_password_short)
+                valid = false
+            }
+            if (!valid) return@setOnClickListener
+
+            sendCodeButton.isEnabled = false
+            lifecycleScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        repository.requestRegistrationEmailCode(email, password)
+                    }
+                    requestedEmail = email
+                    requestedPassword = password
+                    registerToken = ""
+                    emailVerified = false
+                    verificationStatusView.text = getString(R.string.registration_code_sent)
+                    syncVerificationUi()
+                } catch (error: Exception) {
+                    toast(getString(R.string.registration_code_send_failed, humanReadableRegistrationError(error)))
+                } finally {
+                    sendCodeButton.isEnabled = true
+                }
+            }
+        }
+
+        verifyCodeButton.setOnClickListener {
+            codeLayout.error = null
+
+            val email = emailInput.text.toString().trim()
+            val password = passwordInput.text.toString()
+            val code = codeInput.text.toString().trim()
+
+            if (requestedEmail.isBlank() || requestedPassword.isBlank() ||
+                email != requestedEmail || password != requestedPassword
+            ) {
+                toast(getString(R.string.registration_verify_email_first))
+                return@setOnClickListener
+            }
+            if (!code.matches(Regex("^\\d{6}$"))) {
+                codeLayout.error = getString(R.string.registration_code_required)
+                return@setOnClickListener
+            }
+
+            verifyCodeButton.isEnabled = false
+            lifecycleScope.launch {
+                try {
+                    val verificationResult = withContext(Dispatchers.IO) {
+                        repository.verifyRegistrationEmailCode(email, password, code)
+                    }
+                    registerToken = verificationResult.registerToken
+                    emailVerified = true
+                    verificationStatusView.text = getString(R.string.registration_code_verified)
+                    syncVerificationUi()
+                } catch (error: Exception) {
+                    codeLayout.error = humanReadableRegistrationError(error)
+                } finally {
+                    verifyCodeButton.isEnabled = requestedEmail.isNotBlank()
+                }
+            }
+        }
+
         dialog.setOnShowListener {
+            resetVerificationState()
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 emailLayout.error = null
                 displayNameLayout.error = null
                 phoneLayout.error = null
                 passwordLayout.error = null
+                codeLayout.error = null
 
                 val email = emailInput.text.toString().trim()
                 val displayName = displayNameInput.text.toString().trim()
@@ -3226,17 +3260,23 @@ class MainActivity : AppCompatActivity() {
                     toast(getString(R.string.validation_plots_required))
                     valid = false
                 }
+                if (!emailVerified || registerToken.isBlank()) {
+                    toast(getString(R.string.registration_verify_email_first))
+                    valid = false
+                }
                 if (!valid) return@setOnClickListener
 
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
                 lifecycleScope.launch {
                     try {
                         val submission = withContext(Dispatchers.IO) {
-                            repository.submitRegistrationRequest(
-                                login = email,
+                            repository.submitVerifiedRegistrationRequest(
+                                email = email,
                                 password = password,
                                 fullName = displayName,
                                 phone = phone,
-                                plots = selectedPlots.toList()
+                                plots = selectedPlots.toList(),
+                                registerToken = registerToken
                             )
                         }
                         if (submission.staffUserIds.isNotEmpty()) {
@@ -3256,12 +3296,11 @@ class MainActivity : AppCompatActivity() {
                                 )
                             }
                         }
-                        repository.logout()
                         dialog.dismiss()
                         showRegistrationPendingDialog()
                     } catch (error: Exception) {
-                        repository.logout()
                         toast(getString(R.string.registration_request_send_failed, humanReadableRegistrationError(error)))
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = emailVerified
                     }
                 }
             }
@@ -3275,10 +3314,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun humanReadableRegistrationError(error: Throwable): String {
         return when (error) {
-            is FirebaseAuthUserCollisionException -> "такая почта уже зарегистрирована"
-            is FirebaseAuthWeakPasswordException -> "пароль слишком короткий или слишком простой"
-            is FirebaseAuthInvalidCredentialsException -> "некорректная почта"
+            is FirebaseAuthUserCollisionException -> "Такая почта уже зарегистрирована"
+            is FirebaseAuthWeakPasswordException -> "Пароль слишком короткий или слишком простой"
+            is FirebaseAuthInvalidCredentialsException -> "Некорректная почта"
             is IllegalArgumentException -> error.message ?: getString(R.string.generic_error)
+            is IllegalStateException -> error.message ?: getString(R.string.generic_error)
             else -> error.localizedMessage ?: getString(R.string.generic_error)
         }
     }
@@ -3288,6 +3328,12 @@ class MainActivity : AppCompatActivity() {
             val request = withContext(Dispatchers.IO) { repository.getRegistrationRequestForCurrentUser() }
             repository.logout()
             when (request?.status) {
+                RegistrationRequestStatus.VERIFYING -> {
+                    showRegistrationVerificationInfoDialog(getString(R.string.registration_verify_email_after_login_message))
+                }
+                RegistrationRequestStatus.VERIFIED -> {
+                    showRegistrationVerificationInfoDialog(getString(R.string.registration_finish_request_after_verification_message))
+                }
                 RegistrationRequestStatus.PENDING -> showRegistrationPendingDialog()
                 RegistrationRequestStatus.REJECTED -> {
                     val reason = request.reviewReason.ifBlank { getString(R.string.registration_request_reason_empty) }
@@ -3299,19 +3345,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showRegistrationVerificationInfoDialog(message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.open_registration_button)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
     private fun showRegistrationPendingDialog() {
         AlertDialog.Builder(this)
-            .setTitle("Заявка отправлена")
-            .setMessage("Ваша заявка успешно отправлена администратору или модератору. Пока она не будет одобрена, вход в приложение недоступен.")
-            .setPositiveButton("Понятно", null)
+            .setTitle(R.string.registration_request_sent_title)
+            .setMessage(R.string.registration_request_sent_message)
+            .setPositiveButton(android.R.string.ok, null)
             .show()
     }
 
     private fun showRegistrationRejectedDialog(reason: String) {
         AlertDialog.Builder(this)
-            .setTitle("Заявка отклонена")
-            .setMessage("Заявка не была одобрена.\n\nПричина: $reason")
-            .setPositiveButton("Понятно", null)
+            .setTitle(R.string.registration_request_rejected_title)
+            .setMessage(getString(R.string.registration_rejected_message, reason))
+            .setPositiveButton(android.R.string.ok, null)
             .show()
     }
 
