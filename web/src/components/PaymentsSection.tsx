@@ -301,7 +301,7 @@ export function PaymentsSection({
                 <input value={configDraft.recipientKpp} onChange={(event) => updateConfigField('recipientKpp', event.target.value)} />
               </label>
               <label className="payment-form-grid__wide">
-                <span>Ссылка на оплату или QR</span>
+                <span>Ссылка на оплату</span>
                 <input value={configDraft.sbpLink} onChange={(event) => updateConfigField('sbpLink', event.target.value)} />
               </label>
               {configError && <p className="error-note payment-form-grid__wide">{configError}</p>}

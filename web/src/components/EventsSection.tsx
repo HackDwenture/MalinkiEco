@@ -66,6 +66,12 @@ const EXPENSE_TEMPLATES: EventTemplate[] = [
     message: 'Из общей суммы поселка проводится оплата налогов и обязательных начислений.',
     type: 'EXPENSE',
   },
+  {
+    name: 'SIM карта',
+    title: 'Оплата SIM-карты',
+    message: 'Из общей суммы поселка проводится оплата SIM-карты, которая используется для работы оборудования и сервисов поселка.',
+    type: 'EXPENSE',
+  },
 ]
 
 function templatesForType(type: EventType) {
