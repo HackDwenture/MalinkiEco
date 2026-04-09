@@ -7,6 +7,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.CollectionReference
@@ -1622,23 +1623,23 @@ class FirebaseRepository(
     }
 
     private suspend fun ensureRegistrationUser(email: String, password: String) =
-        if (!registrationEmailExists(email)) {
+        try {
+            registrationAuth.signInWithEmailAndPassword(email, password).await()
+        } catch (signInError: FirebaseAuthInvalidUserException) {
             registrationAuth.createUserWithEmailAndPassword(email, password).await()
-        } else {
+        } catch (signInError: FirebaseAuthInvalidCredentialsException) {
+            if (isInvalidEmailAuthError(signInError)) {
+                throw IllegalArgumentException("Введите корректную почту.")
+            }
             try {
-                registrationAuth.signInWithEmailAndPassword(email, password).await()
-            } catch (signInError: FirebaseAuthInvalidUserException) {
                 registrationAuth.createUserWithEmailAndPassword(email, password).await()
-            } catch (signInError: FirebaseAuthInvalidCredentialsException) {
-                if (isInvalidEmailAuthError(signInError)) {
-                    throw IllegalArgumentException("Введите корректную почту.")
-                }
+            } catch (collisionError: FirebaseAuthUserCollisionException) {
                 throw IllegalStateException(
                     "Для этой почты уже начата регистрация с другим паролем. Введите тот же пароль или используйте другую почту."
                 )
-            } catch (signInError: Exception) {
-                throw signInError
             }
+        } catch (signInError: Exception) {
+            throw signInError
         }
 
     private suspend fun syncRegistrationSession(expectedUid: String) {
@@ -1660,11 +1661,6 @@ class FirebaseRepository(
             message.contains("badly formatted") ||
             message.contains("email address is badly formatted") ||
             message.contains("incorrectly formatted")
-    }
-
-    private suspend fun registrationEmailExists(email: String): Boolean {
-        val methods = registrationAuth.fetchSignInMethodsForEmail(email).await().signInMethods.orEmpty()
-        return methods.isNotEmpty()
     }
 
     private suspend fun <T> withRegistrationFirestoreRetry(

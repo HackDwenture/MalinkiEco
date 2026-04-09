@@ -41,7 +41,7 @@ service cloud.firestore {
         request.resource.data.body is string &&
         request.resource.data.category is string &&
         request.resource.data.destination in ['events', 'chat', 'owners', 'polls', 'payments', 'auth'] &&
-        request.resource.data.audience in ['broadcast', 'users', 'emails'] &&
+        request.resource.data.audience in ['broadcast', 'users', 'emails', 'direct_email'] &&
         request.resource.data.attempts == 0 &&
         request.resource.data.processingWorker == '' &&
         request.resource.data.lastError == '' &&
@@ -56,7 +56,7 @@ service cloud.firestore {
         validNotificationJobBase() &&
         (
           (
-            request.resource.data.audience == 'emails' &&
+            request.resource.data.audience in ['emails', 'direct_email'] &&
             request.resource.data.destination == 'auth' &&
             request.resource.data.category == 'verification' &&
             request.resource.data.sendEmail == true &&
