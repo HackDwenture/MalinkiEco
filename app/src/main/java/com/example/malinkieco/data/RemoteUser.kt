@@ -10,5 +10,6 @@ data class RemoteUser(
     val plots: List<String> = emptyList(),
     val role: Role,
     val balance: Int = 0,
-    val lastChatReadAt: Long = 0L
+    val lastChatReadAt: Long = 0L,
+    val isPlaceholder: Boolean = false
 )

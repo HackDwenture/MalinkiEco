@@ -54,6 +54,10 @@ function registrationStatusLabel(request: RegistrationRequest) {
   }
 }
 
+function ownerRoleLabel(owner: RemoteUser, roleLabel: (role: Role) => string) {
+  return owner.isPlaceholder ? 'Не зарегистрирован' : roleLabel(owner.role)
+}
+
 export function OwnersSection({
   profile,
   owners,
@@ -206,9 +210,9 @@ export function OwnersSection({
           <article key={owner.id} className={`owner-card ${balanceTone(owner.balance)}`}>
             <h3>{owner.fullName}</h3>
             <p>{formatPlots(owner)}</p>
-            <span className="owner-role">{roleLabel(owner.role)}</span>
-            {isStaff && owner.phone && <p>{formatRussianPhone(owner.phone)}</p>}
-            {isStaff && owner.email && <p>{owner.email}</p>}
+            <span className="owner-role">{ownerRoleLabel(owner, roleLabel)}</span>
+            {isStaff && !owner.isPlaceholder && owner.phone && <p>{formatRussianPhone(owner.phone)}</p>}
+            {isStaff && !owner.isPlaceholder && owner.email && <p>{owner.email}</p>}
             <strong>{owner.balance.toLocaleString('ru-RU')} ₽</strong>
             <span>{balanceLabel(owner.balance)}</span>
             {isStaff && (
@@ -226,7 +230,7 @@ export function OwnersSection({
                 >
                   Изменить баланс
                 </button>
-                {canManageRoles && owner.role !== 'ADMIN' && (
+                {canManageRoles && !owner.isPlaceholder && owner.role !== 'ADMIN' && (
                   <button
                     className="ghost-button"
                     type="button"
@@ -235,7 +239,7 @@ export function OwnersSection({
                     {owner.role === 'MODERATOR' ? 'Снять модератора' : 'Сделать модератором'}
                   </button>
                 )}
-                {owner.role !== 'ADMIN' && (
+                {!owner.isPlaceholder && owner.role !== 'ADMIN' && (
                   <button className="danger-button" type="button" onClick={() => void onDeleteUser(owner)}>
                     Удалить
                   </button>

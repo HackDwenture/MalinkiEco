@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { EMPTY_PAYMENT_CONFIG } from '../constants'
 import { db, firebaseSetup } from '../lib/firebase'
+import { ensurePlotAccounts } from '../lib/appApi'
+import { PLOTS_COLLECTION, buildOwnersDirectory, normalizePlotName } from '../lib/plotAccounts'
 import type {
   AuditLogEntry,
   ChatMessage,
@@ -18,7 +20,7 @@ import type {
 import { extractCreatedAt, toRemoteUser } from '../utils'
 
 export function useResidentData(profile: RemoteUser | null) {
-  const [owners, setOwners] = useState<RemoteUser[]>([])
+  const [users, setUsers] = useState<RemoteUser[]>([])
   const [events, setEvents] = useState<CommunityEvent[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [paymentConfig, setPaymentConfig] = useState<PaymentTransferConfig>(EMPTY_PAYMENT_CONFIG)
@@ -26,21 +28,39 @@ export function useResidentData(profile: RemoteUser | null) {
   const [paymentRequests, setPaymentRequests] = useState<ManualPaymentRequest[]>([])
   const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([])
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+  const [plotBalances, setPlotBalances] = useState<Map<string, number>>(new Map())
 
   useEffect(() => {
     if (!firebaseSetup.ready || !db || !profile) return
 
+    const isStaff = profile.role === 'ADMIN' || profile.role === 'MODERATOR'
+    if (isStaff) {
+      void ensurePlotAccounts(db)
+    }
+
     const usersQuery = query(collection(db, 'users'), orderBy('fullName', 'asc'))
+    const plotsQuery = query(collection(db, PLOTS_COLLECTION), orderBy('sortOrder', 'asc'))
     const eventsQuery = query(collection(db, 'events'), orderBy('createdAt', 'desc'))
     const messagesQuery = query(collection(db, 'chat_messages'), orderBy('createdAt', 'asc'), limitToLast(120))
     const paymentConfigRef = doc(db, 'app_settings', 'payment_config')
     const communityFundsRef = doc(db, 'app_settings', 'community_funds')
 
     const unsubscribeUsers = onSnapshot(usersQuery, (snapshot) => {
-      const nextOwners = snapshot.docs
+      const nextUsers = snapshot.docs
         .map((item) => toRemoteUser(item.id, item.data()))
         .filter((item): item is RemoteUser => item !== null)
-      setOwners(nextOwners)
+      setUsers(nextUsers)
+    })
+
+    const unsubscribePlots = onSnapshot(plotsQuery, (snapshot) => {
+      const nextBalances = new Map<string, number>()
+      snapshot.docs.forEach((item) => {
+        const data = item.data()
+        const name = normalizePlotName(String(data.name ?? ''))
+        if (!name) return
+        nextBalances.set(name, Number(data.balance ?? 0))
+      })
+      setPlotBalances(nextBalances)
     })
 
     const unsubscribeEvents = onSnapshot(eventsQuery, (snapshot) => {
@@ -122,7 +142,6 @@ export function useResidentData(profile: RemoteUser | null) {
     let unsubscribeRegistrationRequests = () => {}
     let unsubscribeAuditLogs = () => {}
 
-    const isStaff = profile.role === 'ADMIN' || profile.role === 'MODERATOR'
     if (isStaff) {
       unsubscribePaymentRequests = onSnapshot(
         query(collection(db, 'payment_requests'), orderBy('createdAt', 'desc')),
@@ -205,6 +224,7 @@ export function useResidentData(profile: RemoteUser | null) {
 
     return () => {
       unsubscribeUsers()
+      unsubscribePlots()
       unsubscribeEvents()
       unsubscribeChat()
       unsubscribePaymentConfig()
@@ -215,7 +235,10 @@ export function useResidentData(profile: RemoteUser | null) {
     }
   }, [profile])
 
+  const owners = useMemo(() => buildOwnersDirectory(users, plotBalances), [users, plotBalances])
+
   return {
+    users,
     owners,
     events,
     chatMessages,

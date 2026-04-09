@@ -16,6 +16,7 @@ export type RemoteUser = {
   lastChatReadAt: number
   phone?: string
   login?: string
+  isPlaceholder?: boolean
 }
 
 export type CommunityEvent = {

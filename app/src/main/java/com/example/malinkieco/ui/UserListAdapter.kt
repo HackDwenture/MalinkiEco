@@ -52,15 +52,23 @@ class UserListAdapter(
         private val demoteButton: Button = itemView.findViewById(R.id.btnDemoteModerator)
 
         fun bind(user: RemoteUser) {
-            title.text = "${formatPlots(user)}  ${user.fullName}"
+            title.text = if (user.isPlaceholder) {
+                "${formatPlots(user)}  ${itemView.context.getString(R.string.role_placeholder_owner)}"
+            } else {
+                "${formatPlots(user)}  ${user.fullName}"
+            }
             email.text = user.email
-            email.visibility = if (canManageUsers) View.VISIBLE else View.GONE
+            email.visibility = if (canManageUsers && !user.isPlaceholder && user.email.isNotBlank()) View.VISIBLE else View.GONE
             phone.text = if (user.phone.isBlank()) "" else itemView.context.getString(
                 R.string.user_phone_format,
                 PhoneFormatUtils.formatRussianPhone(user.phone)
             )
-            phone.visibility = if (canManageUsers && user.phone.isNotBlank()) View.VISIBLE else View.GONE
-            role.text = roleLabel(user.role)
+            phone.visibility = if (canManageUsers && !user.isPlaceholder && user.phone.isNotBlank()) View.VISIBLE else View.GONE
+            role.text = if (user.isPlaceholder) {
+                itemView.context.getString(R.string.role_placeholder_owner)
+            } else {
+                roleLabel(user.role)
+            }
             balance.text = itemView.context.getString(R.string.balance_format, user.balance)
             status.text = balanceStatus(user.balance)
             bindCardStyle(user.balance)
@@ -68,6 +76,7 @@ class UserListAdapter(
             balanceActionsRow.visibility = if (canManageUsers) View.VISIBLE else View.GONE
 
             val canManageModerator = canManageModerators &&
+                !user.isPlaceholder &&
                 user.id != currentUserIdProvider() &&
                 user.role != Role.ADMIN
             moderatorRow.visibility = if (canManageModerator) View.VISIBLE else View.GONE
@@ -75,6 +84,7 @@ class UserListAdapter(
             demoteButton.visibility = if (canManageModerator && user.role == Role.MODERATOR) View.VISIBLE else View.GONE
 
             editBalanceButton.setOnClickListener { onEditBalance(user) }
+            deleteButton.visibility = if (user.isPlaceholder) View.GONE else View.VISIBLE
             deleteButton.setOnClickListener { onDelete(user) }
             promoteButton.setOnClickListener { onPromoteModerator(user) }
             demoteButton.setOnClickListener { onDemoteModerator(user) }

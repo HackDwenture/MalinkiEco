@@ -49,6 +49,7 @@ class FirebaseRepository(
     private val auditLogs = firestore.collection(AUDIT_LOGS_COLLECTION)
     private val userDevices = firestore.collection(USER_DEVICES_COLLECTION)
     private val notificationJobs = firestore.collection(NOTIFICATION_JOBS_COLLECTION)
+    private val plotAccounts = firestore.collection(PLOT_ACCOUNTS_COLLECTION)
     private val registrationApp by lazy { resolveRegistrationApp() }
     private val registrationAuth by lazy { FirebaseAuth.getInstance(registrationApp) }
     private val registrationFirestore by lazy { FirebaseFirestore.getInstance(registrationApp) }
@@ -167,8 +168,11 @@ class FirebaseRepository(
     }
 
     suspend fun getAllUsers(): List<RemoteUser> {
+        val plotBalances = loadPlotBalanceMap()
         val snapshot = users.orderBy("plotName", Query.Direction.ASCENDING).get().await()
-        return snapshot.documents.mapNotNull { it.toRemoteUser() }
+        return snapshot.documents
+            .mapNotNull { it.toRemoteUser() }
+            .map { applyPlotBalance(it, plotBalances) }
     }
 
     suspend fun addUser(
@@ -504,7 +508,25 @@ class FirebaseRepository(
     }
 
     suspend fun setUserBalance(targetUser: RemoteUser, newBalance: Int, actor: RemoteUser) {
-        users.document(targetUser.id).update("balance", newBalance).await()
+        val targetPlots = normalizePlots(targetUser.plots.ifEmpty { listOf(targetUser.plotName) })
+        if (targetPlots.isEmpty()) {
+            users.document(targetUser.id).update("balance", newBalance).await()
+        } else {
+            val plotBalances = ensurePlotAccounts()
+            val currentBalance = sumBalanceForPlots(plotBalances, targetPlots, targetUser.balance)
+            val nextPlotBalances = plotBalances.toMutableMap()
+            val deltaByPlot = splitAmountAcrossPlots(targetPlots, newBalance - currentBalance)
+            deltaByPlot.forEach { (plot, delta) ->
+                nextPlotBalances[plot] = (nextPlotBalances[plot] ?: 0) + delta
+            }
+
+            val userSnapshots = users.get().await()
+            val batch = firestore.batch()
+            writePlotBalances(batch, nextPlotBalances, deltaByPlot.keys.toList())
+            syncUserBalances(batch, userSnapshots.documents, nextPlotBalances)
+            batch.commit().await()
+        }
+
         createAuditLog(
             actor = actor,
             title = "Изменен баланс участника",
@@ -569,6 +591,7 @@ class FirebaseRepository(
     }
 
     suspend fun confirmPaymentRequest(requestId: String, reviewer: RemoteUser) {
+        val plotBalances = ensurePlotAccounts()
         val requestRef = paymentRequests.document(requestId)
         val allUsersSnapshot = users.get().await()
         val confirmedRequest = firestore.runTransaction { transaction ->
@@ -587,31 +610,26 @@ class FirebaseRepository(
             val userSnapshot = transaction.get(userRef)
             val payerPlots = userSnapshot.extractPlots()
             val plotShares = splitAmountAcrossPlots(payerPlots, amount)
-            val affectedUsers = allUsersSnapshot.documents
-                .mapNotNull { snapshot ->
-                    val candidate = snapshot.toRemoteUser() ?: return@mapNotNull null
-                    val increment = candidate.plots
-                        .ifEmpty { listOf(candidate.plotName) }
-                        .sumOf { plotShares[it] ?: 0 }
-                    if (candidate.role == Role.ADMIN || increment == 0) {
-                        null
-                    } else {
-                        candidate.id to users.document(candidate.id)
-                    }
+            val nextPlotBalances = plotBalances.toMutableMap().apply {
+                plotShares.forEach { (plot, increment) ->
+                    this[plot] = (this[plot] ?: 0) + increment
                 }
+            }
             val fundsRef = appSettings.document(COMMUNITY_FUNDS_DOCUMENT)
             val currentFunds = transaction.get(fundsRef).getLong("amount")?.toInt() ?: 0
-            val affectedSnapshots = affectedUsers.associate { (affectedUserId, affectedRef) ->
-                affectedUserId to transaction.get(affectedRef)
+            plotShares.forEach { (plot, _) ->
+                transaction.set(
+                    plotAccounts.document(plotDocumentId(plot)),
+                    plotDocumentData(plot, nextPlotBalances.getValue(plot)),
+                    SetOptions.merge()
+                )
             }
-            val incrementsByUserId = affectedSnapshots.mapValues { (_, snapshot) ->
-                snapshot.extractPlots().sumOf { plotShares[it] ?: 0 }
-            }
-
-            affectedUsers.forEach { (affectedUserId, affectedRef) ->
-                val currentBalance = affectedSnapshots.getValue(affectedUserId).getLong("balance")?.toInt() ?: 0
-                val increment = incrementsByUserId.getValue(affectedUserId)
-                transaction.update(affectedRef, "balance", currentBalance + increment)
+            allUsersSnapshot.documents.forEach { snapshot ->
+                val currentBalance = snapshot.getLong("balance")?.toInt() ?: 0
+                val nextBalance = sumBalanceForPlots(nextPlotBalances, snapshot.extractPlots(), currentBalance)
+                if (currentBalance != nextBalance) {
+                    transaction.update(users.document(snapshot.id), "balance", nextBalance)
+                }
             }
             transaction.update(
                 requestRef,
@@ -772,6 +790,7 @@ class FirebaseRepository(
     }
 
     suspend fun approveRegistrationRequest(requestId: String, reviewer: RemoteUser) {
+        val plotBalances = ensurePlotAccounts()
         val requestRef = registrationRequests.document(requestId)
         val approvedRequest = firestore.runTransaction { transaction ->
             val request = transaction.get(requestRef).toRegistrationRequest()
@@ -790,7 +809,7 @@ class FirebaseRepository(
                     "plotName" to request.plots.joinToString(", "),
                     "plots" to request.plots,
                     "role" to Role.USER.name,
-                    "balance" to 0
+                    "balance" to sumBalanceForPlots(plotBalances, request.plots, 0)
                 )
             )
             transaction.update(
@@ -1030,25 +1049,31 @@ class FirebaseRepository(
         )
 
         if (type == EventType.CHARGE) {
+            val plotBalances = ensurePlotAccounts()
             val snapshot = users.get().await()
             val batch = firestore.batch()
-            snapshot.documents.mapNotNull { it.toRemoteUser() }
-                .filter { it.role != Role.ADMIN }
-                .forEach { user ->
-                    val plotCount = user.plots.ifEmpty { listOf(user.plotName) }.size.coerceAtLeast(1)
-                    val totalCharge = cleanAmount * plotCount
-                    batch.update(users.document(user.id), "balance", user.balance - totalCharge)
-                    batch.set(
-                        payments.document(),
-                        mapOf(
-                            "userId" to user.id,
-                            "amount" to -totalCharge,
-                            "note" to "Charge event: $cleanTitle",
-                            "createdAt" to FieldValue.serverTimestamp(),
-                            "createdAtClient" to System.currentTimeMillis()
-                        )
-                    )
+            val nextPlotBalances = plotBalances.toMutableMap().apply {
+                PLOT_OPTIONS.forEach { plot ->
+                    this[plot] = (this[plot] ?: 0) - cleanAmount
                 }
+            }
+            writePlotBalances(batch, nextPlotBalances, PLOT_OPTIONS.toList())
+            syncUserBalances(batch, snapshot.documents, nextPlotBalances)
+            snapshot.documents.mapNotNull { it.toRemoteUser() }.forEach { user ->
+                val plotCount = normalizePlots(user.plots.ifEmpty { listOf(user.plotName) }).size.coerceAtLeast(1)
+                val totalCharge = cleanAmount * plotCount
+                if (totalCharge <= 0) return@forEach
+                batch.set(
+                    payments.document(),
+                    mapOf(
+                        "userId" to user.id,
+                        "amount" to -totalCharge,
+                        "note" to "Charge event: $cleanTitle",
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "createdAtClient" to System.currentTimeMillis()
+                    )
+                )
+            }
             batch.set(events.document(), eventData)
             batch.commit().await()
         } else if (type == EventType.EXPENSE) {
@@ -1198,6 +1223,44 @@ class FirebaseRepository(
             )
         }
     }
+
+    suspend fun ensurePlotAccounts(): Map<String, Int> {
+        val usersSnapshot = users.get().await()
+        val plotsSnapshot = plotAccounts.get().await()
+        val initialBalances = deriveInitialPlotBalances(usersSnapshot.documents)
+        val plotBalances = PLOT_OPTIONS.associateWith { initialBalances[it] ?: 0 }.toMutableMap()
+        val existingPlots = mutableSetOf<String>()
+
+        plotsSnapshot.documents.mapNotNull { it.toPlotAccount() }.forEach { plotAccount ->
+            existingPlots += plotAccount.name
+            plotBalances[plotAccount.name] = plotAccount.balance
+        }
+
+        val batch = firestore.batch()
+        var hasWrites = false
+
+        PLOT_OPTIONS.forEach { plot ->
+            if (existingPlots.contains(plot)) return@forEach
+            batch.set(plotAccounts.document(plotDocumentId(plot)), plotDocumentData(plot, plotBalances[plot] ?: 0))
+            hasWrites = true
+        }
+
+        usersSnapshot.documents.forEach { snapshot ->
+            val currentBalance = snapshot.getLong("balance")?.toInt() ?: 0
+            val nextBalance = sumBalanceForPlots(plotBalances, snapshot.extractPlots(), currentBalance)
+            if (currentBalance != nextBalance) {
+                batch.update(users.document(snapshot.id), "balance", nextBalance)
+                hasWrites = true
+            }
+        }
+
+        if (hasWrites) {
+            batch.commit().await()
+        }
+
+        return plotBalances
+    }
+
     fun observeUsers(onChange: (List<RemoteUser>) -> Unit, onError: (Exception) -> Unit): ListenerRegistration {
         return users.orderBy("plotName", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
@@ -1207,6 +1270,47 @@ class FirebaseRepository(
                 }
                 onChange(snapshot?.documents?.mapNotNull { it.toRemoteUser() }.orEmpty())
             }
+    }
+
+    fun observeOwners(onChange: (List<RemoteUser>) -> Unit, onError: (Exception) -> Unit): ListenerRegistration {
+        var latestUsers = emptyList<RemoteUser>()
+        var latestPlotBalances = emptyMap<String, Int>()
+
+        fun emitOwners() {
+            onChange(buildOwnerDirectory(latestUsers, latestPlotBalances))
+        }
+
+        val usersRegistration = users.orderBy("plotName", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                    return@addSnapshotListener
+                }
+
+                latestUsers = snapshot?.documents?.mapNotNull { it.toRemoteUser() }.orEmpty()
+                emitOwners()
+            }
+
+        val plotsRegistration = plotAccounts.orderBy("sortOrder", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                    return@addSnapshotListener
+                }
+
+                latestPlotBalances = snapshot?.documents
+                    ?.mapNotNull { it.toPlotAccount() }
+                    ?.associate { it.name to it.balance }
+                    .orEmpty()
+                emitOwners()
+            }
+
+        return object : ListenerRegistration {
+            override fun remove() {
+                usersRegistration.remove()
+                plotsRegistration.remove()
+            }
+        }
     }
 
     fun observeLatestMessages(
@@ -1358,26 +1462,36 @@ class FirebaseRepository(
             fullName = fullName,
             phone = phone,
             plotName = plotName,
-            plots = normalizedPlots.ifEmpty { listOf(plotName) },
+            plots = normalizePlots(normalizedPlots.ifEmpty { listOf(plotName) }),
             role = role,
             balance = balance,
-            lastChatReadAt = lastChatReadAt
+            lastChatReadAt = lastChatReadAt,
+            isPlaceholder = false
+        )
+    }
+
+    private fun DocumentSnapshot.toPlotAccount(): PlotAccount? {
+        val rawName = getString("name").orEmpty()
+        val normalizedName = normalizePlotName(rawName)
+            .ifBlank { PLOT_OPTIONS.firstOrNull { plotDocumentId(it) == id }.orEmpty() }
+        if (normalizedName.isBlank()) return null
+        return PlotAccount(
+            id = id,
+            name = normalizedName,
+            balance = getLong("balance")?.toInt() ?: 0
         )
     }
 
     private fun DocumentSnapshot.extractPlots(): List<String> {
         val plots = get("plots") as? List<*>
-        val normalizedPlots = plots?.mapNotNull { it?.toString()?.trim() }?.filter { it.isNotBlank() }.orEmpty()
+        val normalizedPlots = normalizePlots(plots?.mapNotNull { it?.toString()?.trim() }.orEmpty())
         if (normalizedPlots.isNotEmpty()) return normalizedPlots
-        return getString("plotName")
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotBlank() }
-            .orEmpty()
+        val plotName = getString("plotName").orEmpty()
+        return normalizePlots(plotName.split(",").map { it.trim() })
     }
 
     private fun splitAmountAcrossPlots(plots: List<String>, amount: Int): Map<String, Int> {
-        val normalizedPlots = plots.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val normalizedPlots = normalizePlots(plots)
         if (normalizedPlots.isEmpty() || amount == 0) return emptyMap()
 
         val baseShare = amount / normalizedPlots.size
@@ -1391,6 +1505,141 @@ class FirebaseRepository(
             }
             baseShare + extra
         }
+    }
+
+    private fun normalizePlotName(raw: String): String {
+        val normalized = raw.trim().removePrefix("Участок").trim()
+        return if (normalized.isBlank()) "" else "Участок $normalized"
+    }
+
+    private fun normalizePlots(plots: List<String>): List<String> {
+        return plots
+            .map { normalizePlotName(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+
+    private fun plotSortValue(raw: String): Int {
+        val normalized = normalizePlotName(raw)
+        val suffix = normalized.removePrefix("Участок").trim()
+        return suffix.toIntOrNull() ?: Int.MAX_VALUE
+    }
+
+    private fun plotDocumentId(plot: String): String {
+        val sortValue = plotSortValue(plot)
+        return if (sortValue != Int.MAX_VALUE) {
+            "plot-${sortValue.toString().padStart(2, '0')}"
+        } else {
+            "plot-" + normalizePlotName(plot)
+                .lowercase()
+                .replace(Regex("[^a-zа-я0-9]+"), "-")
+                .trim('-')
+                .ifBlank { "unknown" }
+        }
+    }
+
+    private fun plotDocumentData(plot: String, balance: Int): Map<String, Any> {
+        return mapOf(
+            "name" to normalizePlotName(plot),
+            "balance" to balance,
+            "sortOrder" to plotSortValue(plot),
+            "updatedAt" to FieldValue.serverTimestamp(),
+            "updatedAtClient" to System.currentTimeMillis()
+        )
+    }
+
+    private fun deriveInitialPlotBalances(userSnapshots: List<DocumentSnapshot>): Map<String, Int> {
+        val balances = PLOT_OPTIONS.associateWith { 0 }.toMutableMap()
+        val seededPlots = mutableSetOf<String>()
+
+        userSnapshots.forEach { snapshot ->
+            val currentBalance = snapshot.getLong("balance")?.toInt() ?: 0
+            if (currentBalance == 0) return@forEach
+            splitAmountAcrossPlots(snapshot.extractPlots(), currentBalance).forEach { (plot, share) ->
+                if (seededPlots.contains(plot)) return@forEach
+                balances[plot] = share
+                seededPlots += plot
+            }
+        }
+
+        return balances
+    }
+
+    private fun sumBalanceForPlots(plotBalances: Map<String, Int>, plots: List<String>, fallback: Int = 0): Int {
+        val normalizedPlots = normalizePlots(plots)
+        if (normalizedPlots.isEmpty()) return fallback
+        if (plotBalances.isEmpty()) return fallback
+        return normalizedPlots.sumOf { plotBalances[it] ?: 0 }
+    }
+
+    private fun applyPlotBalance(user: RemoteUser, plotBalances: Map<String, Int>): RemoteUser {
+        val normalizedPlots = normalizePlots(user.plots.ifEmpty { listOf(user.plotName) })
+        return user.copy(
+            plotName = normalizedPlots.joinToString(", "),
+            plots = normalizedPlots,
+            balance = sumBalanceForPlots(plotBalances, normalizedPlots, user.balance),
+            isPlaceholder = false
+        )
+    }
+
+    private fun buildOwnerDirectory(users: List<RemoteUser>, plotBalances: Map<String, Int>): List<RemoteUser> {
+        val actualUsers = users.map { applyPlotBalance(it, plotBalances) }
+        val registeredPlots = actualUsers.flatMap { normalizePlots(it.plots.ifEmpty { listOf(it.plotName) }) }.toSet()
+        val placeholders = PLOT_OPTIONS
+            .filterNot { registeredPlots.contains(it) }
+            .map { plot ->
+                RemoteUser(
+                    id = "placeholder:${plotDocumentId(plot)}",
+                    email = "",
+                    fullName = "Собственник не зарегистрирован",
+                    phone = "",
+                    plotName = plot,
+                    plots = listOf(plot),
+                    role = Role.USER,
+                    balance = sumBalanceForPlots(plotBalances, listOf(plot), 0),
+                    lastChatReadAt = 0L,
+                    isPlaceholder = true
+                )
+            }
+
+        return (actualUsers + placeholders).sortedWith(
+            compareBy<RemoteUser>(
+                { plotSortValue(it.plots.firstOrNull() ?: it.plotName) },
+                { if (it.isPlaceholder) 1 else 0 },
+                { it.fullName.lowercase() }
+            )
+        )
+    }
+
+    private fun writePlotBalances(batch: com.google.firebase.firestore.WriteBatch, plotBalances: Map<String, Int>, targetPlots: List<String>) {
+        normalizePlots(targetPlots).forEach { plot ->
+            batch.set(
+                plotAccounts.document(plotDocumentId(plot)),
+                plotDocumentData(plot, plotBalances[plot] ?: 0),
+                SetOptions.merge()
+            )
+        }
+    }
+
+    private fun syncUserBalances(
+        batch: com.google.firebase.firestore.WriteBatch,
+        userSnapshots: List<DocumentSnapshot>,
+        plotBalances: Map<String, Int>
+    ) {
+        userSnapshots.forEach { snapshot ->
+            val currentBalance = snapshot.getLong("balance")?.toInt() ?: 0
+            val nextBalance = sumBalanceForPlots(plotBalances, snapshot.extractPlots(), currentBalance)
+            if (currentBalance != nextBalance) {
+                batch.update(users.document(snapshot.id), "balance", nextBalance)
+            }
+        }
+    }
+
+    private suspend fun loadPlotBalanceMap(): Map<String, Int> {
+        val snapshot = plotAccounts.get().await()
+        return snapshot.documents
+            .mapNotNull { it.toPlotAccount() }
+            .associate { it.name to it.balance }
     }
 
     private suspend fun createAuditLog(
@@ -1736,6 +1985,12 @@ class FirebaseRepository(
         val requestData: DocumentSnapshot?
     )
 
+    private data class PlotAccount(
+        val id: String,
+        val name: String,
+        val balance: Int
+    )
+
     private fun deviceTokenDocumentId(userId: String, token: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest("$userId:$token".toByteArray(Charsets.UTF_8))
@@ -1763,8 +2018,10 @@ class FirebaseRepository(
         private const val AUDIT_LOGS_COLLECTION = "audit_logs"
         private const val USER_DEVICES_COLLECTION = "user_devices"
         private const val NOTIFICATION_JOBS_COLLECTION = "notification_jobs"
+        private const val PLOT_ACCOUNTS_COLLECTION = "plots"
         private const val REGISTRATION_APP_NAME = "malinkieco-registration"
         private const val VERIFICATION_TTL_MS = 10 * 60 * 1000L
+        private val PLOT_OPTIONS = List(35) { index -> "Участок ${index + 1}" }
     }
 }
 

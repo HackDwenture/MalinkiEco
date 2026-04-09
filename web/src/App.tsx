@@ -97,6 +97,7 @@ function App() {
   })
 
   const {
+    users,
     owners,
     events,
     chatMessages,
@@ -114,11 +115,11 @@ function App() {
   const pendingOwnersItemsCount = pendingPaymentRequestsCount + pendingRegistrationRequestsCount
   const staffUserIds = useMemo(
     () =>
-      owners
+      users
         .filter((owner) => owner.role === 'ADMIN' || owner.role === 'MODERATOR')
         .map((owner) => owner.id)
         .filter(Boolean),
-    [owners],
+    [users],
   )
 
   const visibleTabs = useMemo<TabKey[]>(
@@ -128,10 +129,10 @@ function App() {
 
   const chatReaderCutoff = useMemo(() => {
     if (!profile) return 0
-    return owners
+    return users
       .filter((owner) => owner.id !== profile.id)
       .reduce((maxValue, owner) => Math.max(maxValue, Number(owner.lastChatReadAt ?? 0)), 0)
-  }, [owners, profile])
+  }, [users, profile])
 
   const visibleEvents = useMemo(
     () => events.filter((item) => item.type !== 'POLL' && (item.targetUserId === '' || item.targetUserId === profile?.id)),
@@ -151,14 +152,14 @@ function App() {
   const collectBroadcastEmailTargets = (excludedUserIds: string[] = []) => {
     const excluded = new Set(excludedUserIds)
     return dedupeEmailTargets(
-      owners.filter((owner) => owner.id && !excluded.has(owner.id)).map((owner) => owner.email),
+      users.filter((owner) => owner.id && !excluded.has(owner.id)).map((owner) => owner.email),
     )
   }
 
   const collectTargetedEmailTargets = (targetUserIds: string[]) => {
     const targets = new Set(targetUserIds)
     return dedupeEmailTargets(
-      owners.filter((owner) => owner.id && targets.has(owner.id)).map((owner) => owner.email),
+      users.filter((owner) => owner.id && targets.has(owner.id)).map((owner) => owner.email),
     )
   }
 
@@ -950,7 +951,7 @@ function App() {
         {activeTab === 'chat' && (
           <ResidentChat
             profile={profile}
-            users={owners}
+            users={users}
             messages={chatMessages}
             readerCutoff={chatReaderCutoff}
             onSend={sendChatMessage}

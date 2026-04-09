@@ -256,6 +256,7 @@ class MainActivity : AppCompatActivity() {
     private var latestEvents = emptyList<CommunityEvent>()
     private var latestPolls = emptyList<CommunityEvent>()
     private var usersListener: ListenerRegistration? = null
+    private var ownersListener: ListenerRegistration? = null
     private var chatListener: ListenerRegistration? = null
     private var eventsListener: ListenerRegistration? = null
     private var auditLogsListener: ListenerRegistration? = null
@@ -435,6 +436,7 @@ class MainActivity : AppCompatActivity() {
         mainHandler.removeCallbacks(chatReadRetryFast)
         mainHandler.removeCallbacks(chatReadRetrySlow)
         usersListener?.remove()
+        ownersListener?.remove()
         chatListener?.remove()
         eventsListener?.remove()
         auditLogsListener?.remove()
@@ -1195,6 +1197,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun attachRealtimeListeners(user: RemoteUser) {
         usersListener?.remove()
+        ownersListener?.remove()
         chatListener?.remove()
         eventsListener?.remove()
         auditLogsListener?.remove()
@@ -1204,13 +1207,19 @@ class MainActivity : AppCompatActivity() {
         communityFundsListener?.remove()
         pinnedMessageListener?.remove()
 
+        if (user.role == Role.ADMIN || user.role == Role.MODERATOR) {
+            lifecycleScope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { repository.ensurePlotAccounts() }
+                }
+            }
+        }
+
         usersListener = repository.observeUsers(
             onChange = { users ->
                 runOnUiThread {
-                    userAdapter.submitList(users)
                     allUsers = users
                     chatAdapter.notifyDataSetChanged()
-                    tvResidentsEmpty.visibility = if (users.isEmpty()) View.VISIBLE else View.GONE
                     currentUser?.let { active ->
                         val refreshedUser = users.firstOrNull { it.id == active.id }
                         if (refreshedUser == null) {
@@ -1223,6 +1232,16 @@ class MainActivity : AppCompatActivity() {
                         tvWelcomeDetails.text = getString(R.string.your_plot, formatUserPlots(refreshedUser))
                         bindBalanceHero(refreshedUser.balance)
                     }
+                }
+            },
+            onError = { runOnUiThread { toast(getString(R.string.users_load_failed)) } }
+        )
+
+        ownersListener = repository.observeOwners(
+            onChange = { owners ->
+                runOnUiThread {
+                    userAdapter.submitList(owners)
+                    tvResidentsEmpty.visibility = if (owners.isEmpty()) View.VISIBLE else View.GONE
                 }
             },
             onError = { runOnUiThread { toast(getString(R.string.users_load_failed)) } }
@@ -2367,6 +2386,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         usersListener?.remove()
+        ownersListener?.remove()
         chatListener?.remove()
         eventsListener?.remove()
         auditLogsListener?.remove()
@@ -2671,6 +2691,12 @@ class MainActivity : AppCompatActivity() {
                     name = "Налоги",
                     title = "Оплата налогов",
                     message = "Из общей суммы поселка проводится оплата налогов и обязательных начислений.",
+                    type = EventType.EXPENSE
+                ),
+                EventTemplate(
+                    name = "SIM карта",
+                    title = "Оплата SIM-карты",
+                    message = "Из общей суммы поселка проводится оплата SIM-карты, которая используется для работы оборудования и сервисов поселка.",
                     type = EventType.EXPENSE
                 )
             )
@@ -3770,6 +3796,12 @@ class MainActivity : AppCompatActivity() {
                 name = "Вывоз мусора",
                 title = "Оплата за вывоз мусора",
                 message = "Из общей кассы проводится оплата за вывоз мусора. Это обязательный расход для поддержания чистоты в поселке.",
+                type = EventType.EXPENSE
+            ),
+            EventTemplate(
+                name = "SIM карта",
+                title = "Оплата SIM-карты",
+                message = "Из общей суммы поселка проводится оплата SIM-карты, которая используется для работы оборудования и сервисов поселка.",
                 type = EventType.EXPENSE
             ),
             EventTemplate(

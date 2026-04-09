@@ -53,6 +53,7 @@
     <string name="role_admin">Администратор</string>
     <string name="role_moderator">Модератор</string>
     <string name="role_user">Собственник</string>
+    <string name="role_placeholder_owner">Собственник не зарегистрирован</string>
     <string name="admin_dashboard_title">Панель администратора</string>
     <string name="user_dashboard_title">Личный кабинет</string>
     <string name="moderator_dashboard_title">Панель модератора</string>
@@ -146,7 +147,7 @@
     <string name="payment_config_correspondent_hint">Корр. счет</string>
     <string name="payment_config_inn_hint">ИНН при необходимости</string>
     <string name="payment_config_kpp_hint">КПП при необходимости</string>
-    <string name="payment_config_sbp_hint">Ссылка на оплату или QR</string>
+    <string name="payment_config_sbp_hint">Ссылка на оплату</string>
     <string name="payment_config_save">Сохранить реквизиты</string>
     <string name="payment_transfer_title">Оплата переводом</string>
     <string name="payment_transfer_helper">Откройте ссылку в банке или нажмите на нужное поле, чтобы быстро скопировать реквизит.</string>

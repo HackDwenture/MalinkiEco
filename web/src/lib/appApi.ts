@@ -24,6 +24,17 @@ import type {
 } from '../types'
 import { formatPlots } from '../utils'
 import { INITIAL_POLL_DRAFT } from '../constants'
+import {
+  PLOTS_COLLECTION,
+  PLOT_OPTIONS,
+  deriveInitialPlotBalancesFromUsers,
+  extractPlotsFromUserData,
+  normalizePlots,
+  plotDocumentId,
+  plotSortValue,
+  splitAmountAcrossPlots,
+  sumBalanceForPlots,
+} from './plotAccounts'
 
 type EventDraft = {
   title: string
@@ -146,27 +157,93 @@ async function createTargetedEvent(
   })
 }
 
-function extractPlotsFromUserData(data: Record<string, unknown>) {
-  const plots = Array.isArray(data.plots) ? data.plots.map(String).filter(Boolean) : []
-  const plotName = String(data.plotName ?? '')
-  return plots.length > 0 ? plots : [plotName].filter(Boolean)
-}
+export async function ensurePlotAccounts(db: Firestore) {
+  const [plotsSnapshot, usersSnapshot] = await Promise.all([
+    getDocs(collection(db, PLOTS_COLLECTION)),
+    getDocs(collection(db, 'users')),
+  ])
 
-function splitAmountAcrossPlots(plots: string[], amount: number) {
-  const normalizedPlots = plots.filter(Boolean)
-  if (normalizedPlots.length === 0) return {}
+  const initialBalances = deriveInitialPlotBalancesFromUsers(
+    usersSnapshot.docs.map((item) => item.data() as Record<string, unknown>),
+  )
+  const plotBalances = new Map<string, number>(PLOT_OPTIONS.map((plot) => [plot, initialBalances.get(plot) ?? 0]))
+  const existingPlots = new Set<string>()
 
-  const baseShare = Math.floor(amount / normalizedPlots.length)
-  let remainder = amount % normalizedPlots.length
-  const shares: Record<string, number> = {}
-
-  normalizedPlots.forEach((plot) => {
-    const extra = remainder > 0 ? 1 : 0
-    shares[plot] = (shares[plot] ?? 0) + baseShare + extra
-    remainder -= extra
+  plotsSnapshot.docs.forEach((item) => {
+    const data = item.data() as Record<string, unknown>
+    const name = normalizePlots([String(data.name ?? '')])[0] ?? ''
+    if (!name) return
+    existingPlots.add(name)
+    plotBalances.set(name, Number(data.balance ?? 0))
   })
 
-  return shares
+  const batch = writeBatch(db)
+  let hasWrites = false
+  const updatedAtClient = Date.now()
+
+  PLOT_OPTIONS.forEach((plot) => {
+    if (existingPlots.has(plot)) return
+    batch.set(doc(db, PLOTS_COLLECTION, plotDocumentId(plot)), {
+      name: plot,
+      balance: plotBalances.get(plot) ?? 0,
+      sortOrder: plotSortValue(plot),
+      updatedAt: serverTimestamp(),
+      updatedAtClient,
+    })
+    hasWrites = true
+  })
+
+  usersSnapshot.docs.forEach((item) => {
+    const data = item.data() as Record<string, unknown>
+    const currentBalance = Number(data.balance ?? 0)
+    const nextBalance = sumBalanceForPlots(plotBalances, extractPlotsFromUserData(data), currentBalance)
+    if (currentBalance === nextBalance) return
+    batch.update(doc(db, 'users', item.id), { balance: nextBalance })
+    hasWrites = true
+  })
+
+  if (hasWrites) {
+    await batch.commit()
+  }
+
+  return plotBalances
+}
+
+function setPlotBalancesInBatch(
+  db: Firestore,
+  batch: ReturnType<typeof writeBatch>,
+  plotBalances: Map<string, number>,
+  targetPlots: string[],
+) {
+  const updatedAtClient = Date.now()
+  normalizePlots(targetPlots).forEach((plot) => {
+    batch.set(
+      doc(db, PLOTS_COLLECTION, plotDocumentId(plot)),
+      {
+        name: plot,
+        balance: plotBalances.get(plot) ?? 0,
+        sortOrder: plotSortValue(plot),
+        updatedAt: serverTimestamp(),
+        updatedAtClient,
+      },
+      { merge: true },
+    )
+  })
+}
+
+function syncUserBalancesInBatch(
+  db: Firestore,
+  batch: ReturnType<typeof writeBatch>,
+  userDocs: Awaited<ReturnType<typeof getDocs>>['docs'],
+  plotBalances: Map<string, number>,
+) {
+  userDocs.forEach((item) => {
+    const data = item.data() as Record<string, unknown>
+    const currentBalance = Number(data.balance ?? 0)
+    const nextBalance = sumBalanceForPlots(plotBalances, extractPlotsFromUserData(data), currentBalance)
+    if (currentBalance === nextBalance) return
+    batch.update(doc(db, 'users', item.id), { balance: nextBalance })
+  })
 }
 
 export async function approveRegistrationRequest(
@@ -174,8 +251,10 @@ export async function approveRegistrationRequest(
   reviewer: RemoteUser,
   request: RegistrationRequest,
 ) {
+  const plotBalances = await ensurePlotAccounts(db)
   const requestRef = doc(db, 'registration_requests', request.id)
   const userRef = doc(db, 'users', request.id)
+  const initialBalance = sumBalanceForPlots(plotBalances, request.plots, 0)
 
   await runTransaction(db, async (transaction) => {
     const snapshot = await transaction.get(requestRef)
@@ -190,7 +269,7 @@ export async function approveRegistrationRequest(
       plotName: request.plots.join(', '),
       plots: request.plots,
       role: 'USER',
-      balance: 0,
+      balance: initialBalance,
       lastChatReadAt: 0,
     })
     transaction.update(requestRef, {
@@ -248,7 +327,25 @@ export async function setUserBalance(
   targetUser: RemoteUser,
   newBalance: number,
 ) {
-  await updateDoc(doc(db, 'users', targetUser.id), { balance: newBalance })
+  const targetPlots = normalizePlots(targetUser.plots.length > 0 ? targetUser.plots : [targetUser.plotName])
+  if (targetPlots.length === 0) {
+    await updateDoc(doc(db, 'users', targetUser.id), { balance: newBalance })
+  } else {
+    const plotBalances = await ensurePlotAccounts(db)
+    const currentBalance = sumBalanceForPlots(plotBalances, targetPlots, targetUser.balance)
+    const nextPlotBalances = new Map(plotBalances)
+    const deltaByPlot = splitAmountAcrossPlots(targetPlots, newBalance - currentBalance)
+    deltaByPlot.forEach((delta, plot) => {
+      nextPlotBalances.set(plot, (nextPlotBalances.get(plot) ?? 0) + delta)
+    })
+
+    const usersSnapshot = await getDocs(collection(db, 'users'))
+    const batch = writeBatch(db)
+    setPlotBalancesInBatch(db, batch, nextPlotBalances, [...deltaByPlot.keys()])
+    syncUserBalancesInBatch(db, batch, usersSnapshot.docs, nextPlotBalances)
+    await batch.commit()
+  }
+
   await createAuditLog(
     db,
     actor,
@@ -386,21 +483,23 @@ export async function createEvent(db: Firestore, creator: RemoteUser, draft: Eve
   }
 
   if (type === 'CHARGE') {
+    const plotBalances = await ensurePlotAccounts(db)
     const usersSnapshot = await getDocs(collection(db, 'users'))
     const batch = writeBatch(db)
+    const nextPlotBalances = new Map(plotBalances)
+    PLOT_OPTIONS.forEach((plot) => {
+      nextPlotBalances.set(plot, (nextPlotBalances.get(plot) ?? 0) - amount)
+    })
+
+    setPlotBalancesInBatch(db, batch, nextPlotBalances, PLOT_OPTIONS)
+    syncUserBalancesInBatch(db, batch, usersSnapshot.docs, nextPlotBalances)
+
     usersSnapshot.docs.forEach((snapshot) => {
       const data = snapshot.data()
-      const role = String(data.role ?? 'USER')
-      if (role === 'ADMIN') return
-
       const plots = extractPlotsFromUserData(data)
       const plotCount = Math.max(plots.length, 1)
       const totalCharge = amount * plotCount
-      const currentBalance = Number(data.balance ?? 0)
-
-      batch.update(doc(db, 'users', snapshot.id), {
-        balance: currentBalance - totalCharge,
-      })
+      if (totalCharge <= 0) return
       batch.set(doc(collection(db, 'payments')), {
         userId: snapshot.id,
         amount: -totalCharge,
@@ -581,6 +680,7 @@ export async function confirmPaymentRequest(
   reviewer: RemoteUser,
   requestId: string,
 ) {
+  const plotBalances = await ensurePlotAccounts(db)
   const allUsersSnapshot = await getDocs(collection(db, 'users'))
   const requestRef = doc(db, 'payment_requests', requestId)
   const fundsRef = doc(db, 'app_settings', 'community_funds')
@@ -603,20 +703,29 @@ export async function confirmPaymentRequest(
     const plotShares = splitAmountAcrossPlots(payerPlots, amount)
     const currentFunds = Number(currentFundsSnapshot.data()?.amount ?? 0)
 
-    const affectedUsers = allUsersSnapshot.docs
-      .map((snapshot) => ({ id: snapshot.id, data: snapshot.data() as Record<string, unknown> }))
-      .map((item) => {
-        const plots = extractPlotsFromUserData(item.data)
-        const role = String(item.data.role ?? 'USER')
-        const increment = plots.reduce((sum, plot) => sum + (plotShares[plot] ?? 0), 0)
-        return { ...item, role, increment }
-      })
-      .filter((item) => item.role !== 'ADMIN' && item.increment !== 0)
+    const nextPlotBalances = new Map(plotBalances)
+    plotShares.forEach((increment, plot) => {
+      nextPlotBalances.set(plot, (nextPlotBalances.get(plot) ?? 0) + increment)
+      transaction.set(
+        doc(db, PLOTS_COLLECTION, plotDocumentId(plot)),
+        {
+          name: plot,
+          balance: nextPlotBalances.get(plot) ?? 0,
+          sortOrder: plotSortValue(plot),
+          updatedAt: serverTimestamp(),
+          updatedAtClient: Date.now(),
+        },
+        { merge: true },
+      )
+    })
 
-    affectedUsers.forEach((item) => {
-      const currentBalance = Number(item.data.balance ?? 0)
+    allUsersSnapshot.docs.forEach((item) => {
+      const data = item.data() as Record<string, unknown>
+      const currentBalance = Number(data.balance ?? 0)
+      const nextBalance = sumBalanceForPlots(nextPlotBalances, extractPlotsFromUserData(data), currentBalance)
+      if (currentBalance === nextBalance) return
       transaction.update(doc(db, 'users', item.id), {
-        balance: currentBalance + item.increment,
+        balance: nextBalance,
       })
     })
 
