@@ -1650,8 +1650,30 @@ class MainActivity : AppCompatActivity() {
                             body = title,
                             destination = "events",
                             category = "events",
-                            excludedUserIds = listOf(creator.id),
-                            sendEmail = true
+                            excludedUserIds = listOf(creator.id)
+                        )
+                    }
+                    runCatching {
+                        val emailSubject = when (type) {
+                            EventType.CHARGE -> "Сбор средств"
+                            EventType.EXPENSE -> "Оплата"
+                            else -> "Уведомление"
+                        }
+                        val emailMessage = message.ifBlank {
+                            when (type) {
+                                EventType.CHARGE -> "Открыт новый сбор средств."
+                                EventType.EXPENSE -> "Опубликована новая оплата из общей кассы."
+                                else -> "Опубликовано новое уведомление."
+                            }
+                        }
+                        enqueueBroadcastEventEmail(
+                            subject = emailSubject,
+                            title = title,
+                            message = emailMessage,
+                            amount = if (type == EventType.INFO) null else amount,
+                            destination = "events",
+                            category = "events",
+                            excludedUserIds = listOf(creator.id)
                         )
                     }
                 }
@@ -1696,8 +1718,19 @@ class MainActivity : AppCompatActivity() {
                             body = title,
                             destination = "polls",
                             category = "polls",
-                            excludedUserIds = listOf(creator.id),
-                            sendEmail = true
+                            excludedUserIds = listOf(creator.id)
+                        )
+                    }
+                    runCatching {
+                        enqueueBroadcastEventEmail(
+                            subject = "Новый опрос",
+                            title = title,
+                            message = message.ifBlank {
+                                "Опубликован новый опрос. Откройте MalinkiEco, чтобы проголосовать."
+                            },
+                            destination = "polls",
+                            category = "polls",
+                            excludedUserIds = listOf(creator.id)
                         )
                     }
                 }
@@ -1977,8 +2010,26 @@ class MainActivity : AppCompatActivity() {
                             title = getString(R.string.push_payment_confirmed_title),
                             body = getString(R.string.push_payment_confirmed_body, request.amount),
                             destination = "events",
+                            category = "payments"
+                        )
+                    }
+                    runCatching {
+                        val paymentTitle = request.eventTitle.ifBlank {
+                            request.purpose.ifBlank { "Платеж пользователя" }
+                        }
+                        val paymentPurpose = request.eventTitle.ifBlank { request.purpose }.ifBlank { null }
+                        val paymentMessage = paymentPurpose
+                            ?.let { "Ваш платеж на сумму ${request.amount} ₽ подтвержден. Назначение: $it." }
+                            ?: "Ваш платеж на сумму ${request.amount} ₽ подтвержден."
+                        enqueueTargetedEventEmail(
+                            subject = "Оплата подтверждена",
+                            title = paymentTitle,
+                            message = paymentMessage,
+                            destination = "payments",
                             category = "payments",
-                            sendEmail = true
+                            targetUserIds = listOf(request.userId),
+                            amount = request.amount,
+                            purpose = paymentPurpose
                         )
                     }
                 }
@@ -2018,8 +2069,27 @@ class MainActivity : AppCompatActivity() {
                                 reason.ifBlank { getString(R.string.registration_request_reason_empty) }
                             ),
                             destination = "events",
+                            category = "payments"
+                        )
+                    }
+                    runCatching {
+                        val paymentTitle = request.eventTitle.ifBlank {
+                            request.purpose.ifBlank { "Платеж пользователя" }
+                        }
+                        val paymentPurpose = request.eventTitle.ifBlank { request.purpose }.ifBlank { null }
+                        val paymentMessage = reason.trim()
+                            .takeIf { it.isNotBlank() }
+                            ?.let { "Ваш платеж на сумму ${request.amount} ₽ отклонен. Причина: $it." }
+                            ?: "Ваш платеж на сумму ${request.amount} ₽ отклонен. Уточните детали у администратора или модератора."
+                        enqueueTargetedEventEmail(
+                            subject = "Оплата отклонена",
+                            title = paymentTitle,
+                            message = paymentMessage,
+                            destination = "payments",
                             category = "payments",
-                            sendEmail = true
+                            targetUserIds = listOf(request.userId),
+                            amount = request.amount,
+                            purpose = paymentPurpose
                         )
                     }
                 }
@@ -2124,8 +2194,24 @@ class MainActivity : AppCompatActivity() {
                                     body = event.title,
                                     destination = if (isPoll) "polls" else "events",
                                     category = if (isPoll) "polls" else "events",
-                                    excludedUserIds = listOf(reviewer.id),
-                                    sendEmail = true
+                                    excludedUserIds = listOf(reviewer.id)
+                                )
+                            }
+                            runCatching {
+                                enqueueBroadcastEventEmail(
+                                    subject = if (isPoll) "Опрос закрыт" else "Сбор закрыт",
+                                    title = event.title,
+                                    message = event.message.ifBlank {
+                                        if (isPoll) {
+                                            "Опрос завершен. Откройте MalinkiEco, чтобы ознакомиться с итогами."
+                                        } else {
+                                            "Сбор завершен. Откройте MalinkiEco, чтобы ознакомиться с деталями."
+                                        }
+                                    },
+                                    amount = if (isPoll) null else event.amount,
+                                    destination = if (isPoll) "polls" else "events",
+                                    category = if (isPoll) "polls" else "events",
+                                    excludedUserIds = listOf(reviewer.id)
                                 )
                             }
                         }
@@ -3450,6 +3536,96 @@ class MainActivity : AppCompatActivity() {
 
     private fun canReviewPayments(user: RemoteUser? = currentUser): Boolean {
         return user?.role == Role.ADMIN || user?.role == Role.MODERATOR
+    }
+
+    private fun normalizeEmail(value: String?): String = value?.trim()?.lowercase().orEmpty()
+
+    private suspend fun collectBroadcastEmailTargets(excludedUserIds: List<String> = emptyList()): List<String> {
+        val excluded = excludedUserIds.toSet()
+        val directory = if (allUsers.isNotEmpty()) allUsers else repository.getAllUsers()
+        return directory
+            .filterNot { excluded.contains(it.id) }
+            .map { normalizeEmail(it.email) }
+            .filter { it.contains("@") }
+            .distinct()
+    }
+
+    private suspend fun collectTargetedEmailTargets(userIds: List<String>): List<String> {
+        if (userIds.isEmpty()) return emptyList()
+        val targets = userIds.toSet()
+        val directory = if (allUsers.isNotEmpty()) allUsers else repository.getAllUsers()
+        return directory
+            .filter { targets.contains(it.id) }
+            .map { normalizeEmail(it.email) }
+            .filter { it.contains("@") }
+            .distinct()
+    }
+
+    private fun buildEventEmailBody(
+        subject: String,
+        title: String,
+        message: String,
+        amount: Int? = null,
+        purpose: String? = null
+    ): String {
+        val lines = mutableListOf(
+            "Здравствуйте!",
+            "",
+            "Тема: $subject",
+            "Заголовок: $title"
+        )
+        if (amount != null && amount > 0) {
+            lines += "Сумма: $amount ₽"
+        }
+        if (!purpose.isNullOrBlank()) {
+            lines += "Назначение: ${purpose.trim()}"
+        }
+        lines += ""
+        lines += message.ifBlank { "Откройте MalinkiEco, чтобы ознакомиться с деталями события." }
+        lines += ""
+        lines += "Рекомендуем открыть MalinkiEco, чтобы ознакомиться с деталями события и актуальной информацией."
+        return lines.joinToString("\n")
+    }
+
+    private suspend fun enqueueBroadcastEventEmail(
+        subject: String,
+        title: String,
+        message: String,
+        amount: Int? = null,
+        destination: String,
+        category: String,
+        excludedUserIds: List<String> = emptyList()
+    ) {
+        val emailTargets = collectBroadcastEmailTargets(excludedUserIds)
+        if (emailTargets.isEmpty()) return
+        repository.enqueueEmailNotificationJob(
+            emailTargets = emailTargets,
+            title = subject,
+            body = buildEventEmailBody(subject, title, message, amount = amount),
+            destination = destination,
+            category = category
+        )
+    }
+
+    private suspend fun enqueueTargetedEventEmail(
+        subject: String,
+        title: String,
+        message: String,
+        destination: String,
+        category: String,
+        targetUserIds: List<String>,
+        amount: Int? = null,
+        purpose: String? = null
+    ) {
+        val emailTargets = collectTargetedEmailTargets(targetUserIds)
+        if (emailTargets.isEmpty()) return
+        repository.enqueueEmailNotificationJob(
+            emailTargets = emailTargets,
+            title = subject,
+            body = buildEventEmailBody(subject, title, message, amount = amount, purpose = purpose),
+            destination = destination,
+            category = category
+        )
     }
 
     private fun captureNotificationDestination(sourceIntent: Intent?) {

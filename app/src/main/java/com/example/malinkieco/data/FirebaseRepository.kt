@@ -143,6 +143,29 @@ class FirebaseRepository(
         )
     }
 
+    suspend fun enqueueEmailNotificationJob(
+        emailTargets: List<String>,
+        title: String,
+        body: String,
+        destination: String,
+        category: String
+    ) {
+        val normalizedTargets = emailTargets.map { it.trim().lowercase() }.filter { it.contains("@") }.distinct()
+        if (normalizedTargets.isEmpty()) return
+        enqueueNotificationJob(
+            audience = "emails",
+            title = title,
+            body = body,
+            destination = destination,
+            category = category,
+            targetUserIds = emptyList(),
+            excludedUserIds = emptyList(),
+            sendEmail = true,
+            sendPush = false,
+            emailTargets = normalizedTargets
+        )
+    }
+
     suspend fun getAllUsers(): List<RemoteUser> {
         val snapshot = users.orderBy("plotName", Query.Direction.ASCENDING).get().await()
         return snapshot.documents.mapNotNull { it.toRemoteUser() }

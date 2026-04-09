@@ -63,6 +63,17 @@ service cloud.firestore {
             request.resource.data.sendPush == false
           ) ||
           (
+            request.resource.data.audience in ['emails', 'direct_email'] &&
+            request.resource.data.destination in ['events', 'polls', 'payments'] &&
+            request.resource.data.category in ['events', 'polls', 'payments'] &&
+            request.resource.data.sendEmail == true &&
+            request.resource.data.sendPush == false &&
+            (
+              canCreateEvents() ||
+              request.resource.data.category == 'polls'
+            )
+          ) ||
+          (
             request.resource.data.audience == 'broadcast' &&
             (
               canCreateEvents() ||
