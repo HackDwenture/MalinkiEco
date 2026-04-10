@@ -887,7 +887,6 @@ class FirebaseRepository(
             minSupportedVersionCode = snapshot.getLong("minSupportedVersionCode") ?: 1L,
             latestVersionName = snapshot.getString("latestVersionName").orEmpty(),
             updateUrl = snapshot.getString("updateUrl").orEmpty(),
-            rustoreUrl = snapshot.getString("rustoreUrl").orEmpty(),
             githubReleaseUrl = snapshot.getString("githubReleaseUrl").orEmpty(),
             githubRepoUrl = snapshot.getString("githubRepoUrl").orEmpty(),
             updateTitle = snapshot.getString("updateTitle").orEmpty(),

@@ -120,6 +120,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnOpenRegistration: Button
     private lateinit var btnOpenSettings: View
     private lateinit var tvHeaderTitle: TextView
+    private lateinit var tvHeaderVersion: TextView
     private lateinit var tvHeaderSubtitle: TextView
     private lateinit var summaryCard: MaterialCardView
     private lateinit var tvWelcome: TextView
@@ -470,6 +471,7 @@ class MainActivity : AppCompatActivity() {
         btnOpenRegistration = findViewById(R.id.btnOpenRegistration)
         btnOpenSettings = findViewById(R.id.btnOpenSettings)
         tvHeaderTitle = findViewById(R.id.tvHeaderTitle)
+        tvHeaderVersion = findViewById(R.id.tvHeaderVersion)
         tvHeaderSubtitle = findViewById(R.id.tvHeaderSubtitle)
         summaryCard = findViewById(R.id.summaryCard)
         tvWelcome = findViewById(R.id.tvWelcome)
@@ -860,7 +862,6 @@ class MainActivity : AppCompatActivity() {
                 val mustUpdate = config?.minSupportedVersionCode?.let { currentVersionCode() < it } ?: false
                 if (mustUpdate) {
                     val primaryUrl = config?.githubReleaseUrl?.ifBlank { config.updateUrl } ?: config?.updateUrl.orEmpty()
-                    val rustoreUrl = config?.rustoreUrl?.ifBlank { config.updateUrl } ?: config?.updateUrl.orEmpty()
                     val githubRepoUrl = config?.githubRepoUrl.orEmpty()
                     showGate(
                         title = config?.updateTitle?.ifBlank { getString(R.string.gate_update_default_title) }
@@ -872,18 +873,16 @@ class MainActivity : AppCompatActivity() {
                             )
                             val latestVersion = config?.latestVersionName?.trim().orEmpty()
                             if (latestVersion.isNotEmpty()) {
-                                append("\\n\\n")
+                                append("\n\n")
                                 append("Актуальная версия: ")
                                 append(latestVersion)
                             }
                         },
                         primaryText = getString(R.string.gate_download_apk_button),
-                        showSecondary = rustoreUrl.isNotBlank(),
-                        secondaryText = getString(R.string.gate_rustore_button),
+                        showSecondary = false,
                         showTertiary = githubRepoUrl.isNotBlank(),
                         tertiaryText = getString(R.string.gate_github_button),
                         onPrimary = { openUpdateUrl(primaryUrl) },
-                        onSecondary = { openUpdateUrl(rustoreUrl) },
                         onTertiary = { openUpdateUrl(githubRepoUrl) }
                     )
                 } else {
@@ -1043,6 +1042,7 @@ class MainActivity : AppCompatActivity() {
         configureTabs(includeLogs = canManageUsers)
 
         tvHeaderTitle.text = getString(R.string.app_name)
+        tvHeaderVersion.text = BuildConfig.VERSION_NAME
         tvHeaderSubtitle.text = when (user.role) {
             Role.ADMIN -> getString(R.string.admin_dashboard_title)
             Role.MODERATOR -> getString(R.string.moderator_dashboard_title)

@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.malinkieco"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "v2.2b"
+        versionCode = 8
+        versionName = "v3.0b"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -45,7 +45,7 @@ android.applicationVariants.configureEach {
     if (buildType.name == "release") {
         outputs.configureEach {
             (this as com.android.build.gradle.internal.api.ApkVariantOutputImpl).outputFileName =
-                "MalinkiEco-v2.2b.apk"
+                "MalinkiEco-v3.0b.apk"
         }
     }
 }

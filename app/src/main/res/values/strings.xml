@@ -1,7 +1,7 @@
 ﻿<resources>
     <string name="app_name">MalinkiEco</string>
     <string name="tagline">Поселок, платежи, события и общий чат в одном приложении</string>
-    <string name="app_version_label">v2.2b</string>
+    <string name="app_version_label">Версия</string>
     <string name="welcome_title">Вход в систему</string>
     <string name="login_hint">Почта</string>
     <string name="password_hint">Пароль</string>
@@ -316,7 +316,6 @@
     <string name="gate_retry_button">Повторить проверку</string>
     <string name="gate_update_button">Обновить приложение</string>
     <string name="gate_download_apk_button">Скачать APK</string>
-    <string name="gate_rustore_button">Открыть в RuStore</string>
     <string name="gate_github_button">Открыть GitHub</string>
     <string name="gate_close_button">Закрыть</string>
     <string name="gate_update_link_missing">Ссылка на обновление пока не настроена</string>
