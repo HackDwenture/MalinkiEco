@@ -1,11 +1,14 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
+import { getDatabase } from 'firebase/database'
 import { getFirestore } from 'firebase/firestore'
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? 'AIzaSyBNg8PHZkoYWi23zuHITwfN2sNxClEVFeE',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? 'malinkiecodb.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? 'malinkiecodb',
+  databaseURL:
+    import.meta.env.VITE_FIREBASE_DATABASE_URL ?? 'https://malinkiecodb-default-rtdb.firebaseio.com',
   storageBucket:
     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? 'malinkiecodb.firebasestorage.app',
   messagingSenderId:
@@ -26,3 +29,5 @@ const app = firebaseSetup.ready ? initializeApp(firebaseConfig) : null
 
 export const auth = app ? getAuth(app) : null
 export const db = app ? getFirestore(app) : null
+export const rtdb = app ? getDatabase(app, firebaseConfig.databaseURL) : null
+export const RTDB_URL = firebaseConfig.databaseURL

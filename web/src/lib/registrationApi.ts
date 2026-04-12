@@ -8,10 +8,11 @@ import {
   type Auth,
   type UserCredential,
 } from 'firebase/auth'
+import { getDatabase } from 'firebase/database'
 import { doc, getDoc, getFirestore, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import type { AuthFormState } from '../types'
 import { enqueueEmailNotification } from './appApi'
-import { firebaseConfig, firebaseSetup } from './firebase'
+import { RTDB_URL, firebaseConfig, firebaseSetup } from './firebase'
 import { isValidRussianPhoneInput, normalizeAuthEmail, normalizeRussianPhone, parsePlots } from '../utils'
 
 const REGISTRATION_AUTH_APP_NAME = 'malinkieco-registration'
@@ -25,6 +26,7 @@ const registrationApp =
 
 const registrationAuth = registrationApp ? getAuth(registrationApp) : null
 const registrationDb = registrationApp ? getFirestore(registrationApp) : null
+const registrationRtdb = registrationApp ? getDatabase(registrationApp, RTDB_URL) : null
 
 function ensureFirebaseReady() {
   if (!firebaseSetup.ready || !registrationDb || !registrationAuth) {
@@ -236,6 +238,9 @@ export async function requestRegistrationEmailCode(email: string, password: stri
           emailTargets: [normalizedEmail],
           sendEmail: true,
           sendPush: false,
+        }, {
+          signalDb: registrationRtdb,
+          creatorId: credential.user.uid,
         }),
       )
     } catch (error) {

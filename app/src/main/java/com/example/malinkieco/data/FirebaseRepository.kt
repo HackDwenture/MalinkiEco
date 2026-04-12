@@ -9,6 +9,8 @@ import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentSnapshot
@@ -50,9 +52,15 @@ class FirebaseRepository(
     private val userDevices = firestore.collection(USER_DEVICES_COLLECTION)
     private val notificationJobs = firestore.collection(NOTIFICATION_JOBS_COLLECTION)
     private val plotAccounts = firestore.collection(PLOT_ACCOUNTS_COLLECTION)
+    private val signalDatabase by lazy { FirebaseDatabase.getInstance(DATABASE_URL) }
+    private val notificationSignals by lazy { signalDatabase.getReference(NOTIFICATION_SIGNALS_PATH) }
     private val registrationApp by lazy { resolveRegistrationApp() }
     private val registrationAuth by lazy { FirebaseAuth.getInstance(registrationApp) }
     private val registrationFirestore by lazy { FirebaseFirestore.getInstance(registrationApp) }
+    private val registrationSignalDatabase by lazy { FirebaseDatabase.getInstance(registrationApp, DATABASE_URL) }
+    private val registrationNotificationSignals by lazy {
+        registrationSignalDatabase.getReference(NOTIFICATION_SIGNALS_PATH)
+    }
 
     fun currentAuthUser(): FirebaseUser? = auth.currentUser
 
@@ -290,6 +298,7 @@ class FirebaseRepository(
 
             enqueueNotificationJob(
                 collection = registrationFirestore.collection(NOTIFICATION_JOBS_COLLECTION),
+                signalReference = registrationNotificationSignals,
                 creatorId = user.uid,
                 audience = "direct_email",
                 title = "Код подтверждения MalinkiEco",
@@ -1670,6 +1679,7 @@ class FirebaseRepository(
 
     private suspend fun enqueueNotificationJob(
         collection: CollectionReference,
+        signalReference: DatabaseReference,
         creatorId: String,
         audience: String,
         title: String,
@@ -1682,14 +1692,17 @@ class FirebaseRepository(
         sendPush: Boolean,
         emailTargets: List<String> = emptyList()
     ) {
+        val cleanCreatorId = creatorId.trim()
         val cleanTitle = title.trim()
         val cleanBody = body.trim()
         val cleanDestination = destination.trim()
         val cleanCategory = category.trim().ifBlank { cleanDestination }
         val createdAtClient = System.currentTimeMillis()
         if (cleanTitle.isBlank() || cleanBody.isBlank() || cleanDestination.isBlank()) return
+        require(cleanCreatorId.isNotBlank()) { "Не удалось определить отправителя уведомления." }
 
-        collection.add(
+        val jobRef = collection.document()
+        jobRef.set(
             mapOf(
                 "status" to "PENDING",
                 "title" to cleanTitle,
@@ -1703,7 +1716,7 @@ class FirebaseRepository(
                 "sendEmail" to sendEmail,
                 "sendPush" to sendPush,
                 "attempts" to 0,
-                "createdById" to creatorId,
+                "createdById" to cleanCreatorId,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "createdAtClient" to createdAtClient,
                 "nextAttemptAtClient" to createdAtClient,
@@ -1711,6 +1724,13 @@ class FirebaseRepository(
                 "lastError" to ""
             )
         ).await()
+
+        try {
+            signalNotificationJob(signalReference, cleanCreatorId, jobRef.id, createdAtClient)
+        } catch (error: Throwable) {
+            runCatching { jobRef.delete().await() }
+            throw error
+        }
     }
 
     private suspend fun enqueueNotificationJob(
@@ -1727,6 +1747,7 @@ class FirebaseRepository(
     ) {
         enqueueNotificationJob(
             collection = notificationJobs,
+            signalReference = notificationSignals,
             creatorId = currentAuthUser()?.uid.orEmpty(),
             audience = audience,
             title = title,
@@ -1739,6 +1760,22 @@ class FirebaseRepository(
             sendPush = sendPush,
             emailTargets = emailTargets
         )
+    }
+
+    private suspend fun signalNotificationJob(
+        signalReference: DatabaseReference,
+        creatorId: String,
+        jobId: String,
+        dueAtClient: Long
+    ) {
+        signalReference.push().setValue(
+            mapOf(
+                "jobId" to jobId,
+                "creatorId" to creatorId,
+                "createdAtClient" to System.currentTimeMillis(),
+                "dueAtClient" to dueAtClient
+            )
+        ).await()
     }
 
     private fun DocumentSnapshot.toAuditLogEntry(): AuditLogEntry? {
@@ -2017,8 +2054,10 @@ class FirebaseRepository(
         private const val AUDIT_LOGS_COLLECTION = "audit_logs"
         private const val USER_DEVICES_COLLECTION = "user_devices"
         private const val NOTIFICATION_JOBS_COLLECTION = "notification_jobs"
+        private const val NOTIFICATION_SIGNALS_PATH = "notification_signals"
         private const val PLOT_ACCOUNTS_COLLECTION = "plots"
         private const val REGISTRATION_APP_NAME = "malinkieco-registration"
+        private const val DATABASE_URL = "https://malinkiecodb-default-rtdb.firebaseio.com/"
         private const val VERIFICATION_TTL_MS = 10 * 60 * 1000L
         private val PLOT_OPTIONS = List(35) { index -> "Участок ${index + 1}" }
     }

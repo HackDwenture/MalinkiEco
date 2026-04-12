@@ -13,6 +13,7 @@
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
+import { push, ref, set, type Database } from 'firebase/database'
 import type {
   ChatMessage,
   CommunityEvent,
@@ -35,6 +36,7 @@ import {
   splitAmountAcrossPlots,
   sumBalanceForPlots,
 } from './plotAccounts'
+import { auth, rtdb } from './firebase'
 
 type EventDraft = {
   title: string
@@ -55,10 +57,34 @@ type NotificationJobPayload = {
   sendPush?: boolean
 }
 
+type NotificationQueueOptions = {
+  signalDb?: Database | null
+  creatorId?: string
+}
+
+const NOTIFICATION_JOBS_COLLECTION = 'notification_jobs'
+const NOTIFICATION_SIGNALS_PATH = 'notification_signals'
+
+async function signalNotificationJob(
+  signalDb: Database,
+  creatorId: string,
+  jobId: string,
+  dueAtClient: number,
+) {
+  const signalRef = push(ref(signalDb, NOTIFICATION_SIGNALS_PATH))
+  await set(signalRef, {
+    jobId,
+    creatorId,
+    createdAtClient: Date.now(),
+    dueAtClient,
+  })
+}
+
 async function enqueueNotificationJob(
   db: Firestore,
   audience: 'broadcast' | 'users' | 'emails',
   payload: NotificationJobPayload,
+  options: NotificationQueueOptions = {},
 ) {
   const title = payload.title.trim()
   const body = payload.body.trim()
@@ -80,7 +106,14 @@ async function enqueueNotificationJob(
   }
 
   const createdAtClient = Date.now()
-  await addDoc(collection(db, 'notification_jobs'), {
+  const signalDb = options.signalDb ?? rtdb
+  const creatorId = (options.creatorId ?? auth?.currentUser?.uid ?? '').trim()
+  if (!signalDb || !creatorId) {
+    throw new Error('Не удалось подготовить realtime-сигнал для отправки уведомления.')
+  }
+
+  const jobRef = doc(collection(db, NOTIFICATION_JOBS_COLLECTION))
+  await setDoc(jobRef, {
     status: 'PENDING',
     title,
     body,
@@ -93,24 +126,44 @@ async function enqueueNotificationJob(
     sendEmail: payload.sendEmail ?? false,
     sendPush: payload.sendPush ?? true,
     attempts: 0,
+    createdById: creatorId,
     createdAt: serverTimestamp(),
     createdAtClient,
     nextAttemptAtClient: createdAtClient,
     processingWorker: '',
     lastError: '',
   })
+
+  try {
+    await signalNotificationJob(signalDb, creatorId, jobRef.id, createdAtClient)
+  } catch (error) {
+    await deleteDoc(jobRef).catch(() => undefined)
+    throw error
+  }
 }
 
-export async function enqueueBroadcastNotification(db: Firestore, payload: NotificationJobPayload) {
-  await enqueueNotificationJob(db, 'broadcast', payload)
+export async function enqueueBroadcastNotification(
+  db: Firestore,
+  payload: NotificationJobPayload,
+  options?: NotificationQueueOptions,
+) {
+  await enqueueNotificationJob(db, 'broadcast', payload, options)
 }
 
-export async function enqueueTargetedNotification(db: Firestore, payload: NotificationJobPayload) {
-  await enqueueNotificationJob(db, 'users', payload)
+export async function enqueueTargetedNotification(
+  db: Firestore,
+  payload: NotificationJobPayload,
+  options?: NotificationQueueOptions,
+) {
+  await enqueueNotificationJob(db, 'users', payload, options)
 }
 
-export async function enqueueEmailNotification(db: Firestore, payload: NotificationJobPayload) {
-  await enqueueNotificationJob(db, 'emails', payload)
+export async function enqueueEmailNotification(
+  db: Firestore,
+  payload: NotificationJobPayload,
+  options?: NotificationQueueOptions,
+) {
+  await enqueueNotificationJob(db, 'emails', payload, options)
 }
 
 async function createAuditLog(
