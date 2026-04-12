@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { signOut } from 'firebase/auth'
 import { auth, db, firebaseSetup } from './lib/firebase'
 import {
@@ -41,6 +41,8 @@ import { usePageNotice } from './hooks/usePageNotice'
 import { useResidentAuth } from './hooks/useResidentAuth'
 import { useResidentData } from './hooks/useResidentData'
 import { useResidentProfile } from './hooks/useResidentProfile'
+import { useWebPush } from './hooks/useWebPush'
+import { clearRequestedTabFromUrl, readRequestedTabFromUrl } from './lib/webPush'
 import type {
   ChatMessage,
   CommunityEvent,
@@ -68,7 +70,7 @@ const EVENT_EMAIL_FOOTER =
   'Рекомендуем открыть MalinkiEco, чтобы ознакомиться с деталями события и актуальной информацией.'
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>('events')
+  const [activeTab, setActiveTab] = useState<TabKey>(() => readRequestedTabFromUrl() ?? 'events')
   const [pollDraft, setPollDraft] = useState<PollDraft>(INITIAL_POLL_DRAFT)
   const [pollSubmitting, setPollSubmitting] = useState(false)
   const { authUser, authLoading } = useFirebaseAuthState()
@@ -95,6 +97,7 @@ function App() {
     authUser,
     onMissingProfile: handleMissingProfileAccess,
   })
+  const webPush = useWebPush(profile, showNotice)
 
   const {
     users,
@@ -126,6 +129,17 @@ function App() {
     () => (isStaff ? ['events', 'chat', 'owners', 'polls', 'payments', 'logs'] : ['events', 'chat', 'owners', 'polls', 'payments']),
     [isStaff],
   )
+
+  useEffect(() => {
+    clearRequestedTabFromUrl()
+  }, [])
+
+  useEffect(() => {
+    if (visibleTabs.includes(activeTab)) {
+      return
+    }
+    setActiveTab(visibleTabs[0])
+  }, [activeTab, visibleTabs])
 
   const chatReaderCutoff = useMemo(() => {
     if (!profile) return 0
@@ -268,6 +282,7 @@ function App() {
 
   const handleLogout = async () => {
     if (!auth) return
+    await webPush.unbindBeforeLogout()
     await signOut(auth)
     setProfile(null)
   }
@@ -900,6 +915,23 @@ function App() {
         </div>
 
         <div className="topbar-actions">
+          <div className={`web-push-card is-${webPush.status}`}>
+            <div className="web-push-card__copy">
+              <span className="web-push-card__eyebrow">Push</span>
+              <strong>{webPush.presentation.title}</strong>
+              <small>{webPush.presentation.description}</small>
+            </div>
+            {webPush.presentation.actionLabel && (
+              <button
+                className="ghost-button web-push-card__button"
+                type="button"
+                onClick={webPush.handleAction}
+                disabled={webPush.busy}
+              >
+                {webPush.presentation.actionLabel}
+              </button>
+            )}
+          </div>
           <div className={`balance-chip ${balanceTone(profile.balance)}`}>
             <span>{balanceLabel(profile.balance)}</span>
             <strong>{profile.balance.toLocaleString('ru-RU')} ₽</strong>
