@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { collection, doc, limitToLast, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { EMPTY_PAYMENT_CONFIG } from '../constants'
 import { db, firebaseSetup } from '../lib/firebase'
-import { ensurePlotAccounts } from '../lib/appApi'
 import { PLOTS_COLLECTION, buildOwnersDirectory, normalizePlotName } from '../lib/plotAccounts'
 import type {
   AuditLogEntry,
@@ -21,6 +20,8 @@ import type {
 import { extractCreatedAt, toRemoteUser } from '../utils'
 
 export function useResidentData(profile: RemoteUser | null, activeTab: TabKey) {
+  const profileId = profile?.id ?? null
+  const profileRole = profile?.role ?? null
   const [users, setUsers] = useState<RemoteUser[]>([])
   const [events, setEvents] = useState<CommunityEvent[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
@@ -32,18 +33,14 @@ export function useResidentData(profile: RemoteUser | null, activeTab: TabKey) {
   const [plotBalances, setPlotBalances] = useState<Map<string, number>>(new Map())
 
   useEffect(() => {
-    if (!firebaseSetup.ready || !db || !profile) return
+    if (!firebaseSetup.ready || !db || !profileId || !profileRole) return
 
-    const isStaff = profile.role === 'ADMIN' || profile.role === 'MODERATOR'
+    const isStaff = profileRole === 'ADMIN' || profileRole === 'MODERATOR'
     const needsEvents = activeTab === 'events' || activeTab === 'polls' || activeTab === 'payments'
     const needsChat = activeTab === 'chat'
     const needsOwners = activeTab === 'owners'
     const needsPayments = activeTab === 'payments'
     const needsLogs = activeTab === 'logs'
-
-    if (isStaff) {
-      void ensurePlotAccounts(db)
-    }
 
     const usersQuery = query(collection(db, 'users'), orderBy('fullName', 'asc'))
 
@@ -275,7 +272,7 @@ export function useResidentData(profile: RemoteUser | null, activeTab: TabKey) {
       unsubscribeRegistrationRequests()
       unsubscribeAuditLogs()
     }
-  }, [activeTab, profile])
+  }, [activeTab, profileId, profileRole])
 
   const owners = useMemo(() => buildOwnersDirectory(users, plotBalances), [users, plotBalances])
 

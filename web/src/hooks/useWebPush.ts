@@ -25,12 +25,13 @@ type WebPushPresentation = {
 const AUTO_PROMPT_SESSION_KEY = 'malinkieco-web-push-autoprompted'
 
 export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallback) {
+  const profileId = profile?.id ?? null
   const [status, setStatus] = useState<WebPushSupportState>('unsupported')
   const [busy, setBusy] = useState(false)
 
   const syncCurrentSubscription = useCallback(
     async (silent = true) => {
-      if (!db || !profile) {
+      if (!db || !profileId) {
         setStatus('unsupported')
         return
       }
@@ -44,7 +45,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
       try {
         const subscription = await getCurrentPushSubscription()
         if (subscription) {
-          await saveWebPushSubscription(db, profile, subscription)
+          await saveWebPushSubscription(db, { id: profileId }, subscription)
           setStatus('enabled')
           return
         }
@@ -56,14 +57,14 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
         }
       }
     },
-    [profile, showNotice],
+    [profileId, showNotice],
   )
 
   useEffect(() => {
     let cancelled = false
 
     const bootstrap = async () => {
-      if (!profile) {
+      if (!profileId) {
         setStatus('unsupported')
         return
       }
@@ -82,11 +83,11 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
     return () => {
       cancelled = true
     }
-  }, [profile, syncCurrentSubscription])
+  }, [profileId, syncCurrentSubscription])
 
   const enable = useCallback(async (options: { silent?: boolean } = {}) => {
     const silent = options.silent === true
-    if (!db || !profile) return
+    if (!db || !profileId) return
 
     const supportState = resolveWebPushSupportState()
     if (supportState === 'install-required') {
@@ -127,7 +128,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
       }
 
       const subscription = await subscribeToWebPush()
-      await saveWebPushSubscription(db, profile, subscription)
+      await saveWebPushSubscription(db, { id: profileId }, subscription)
       setStatus('enabled')
       if (!silent) {
         showNotice('Push для веб-версии включены. На iPhone уведомления будут приходить из установленного приложения.')
@@ -140,7 +141,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
     } finally {
       setBusy(false)
     }
-  }, [profile, showNotice])
+  }, [profileId, showNotice])
 
   const disable = useCallback(async () => {
     if (!db) return
@@ -179,7 +180,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
   }, [busy, disable, enable, status])
 
   useEffect(() => {
-    if (!profile || busy || status !== 'ready' || !isStandaloneDisplayMode()) {
+    if (!profileId || busy || status !== 'ready' || !isStandaloneDisplayMode()) {
       return
     }
 
@@ -201,7 +202,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
       window.removeEventListener('pointerdown', handleFirstGesture)
       window.removeEventListener('keydown', handleFirstGesture)
     }
-  }, [busy, enable, profile, status])
+  }, [busy, enable, profileId, status])
 
   const presentation = useMemo<WebPushPresentation>(() => {
     switch (status) {

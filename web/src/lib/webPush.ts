@@ -22,11 +22,20 @@ function hasWindow(): boolean {
   return typeof window !== 'undefined'
 }
 
+export function isAndroidMobileDevice(): boolean {
+  if (!hasWindow()) return false
+  return /android/i.test(window.navigator.userAgent ?? '')
+}
+
 export function isAppleMobileDevice(): boolean {
   if (!hasWindow()) return false
   const platform = window.navigator.platform ?? ''
   const userAgent = window.navigator.userAgent ?? ''
   return /iphone|ipad|ipod/i.test(userAgent) || (platform === 'MacIntel' && window.navigator.maxTouchPoints > 1)
+}
+
+export function isMobileDevice(): boolean {
+  return isAppleMobileDevice() || isAndroidMobileDevice()
 }
 
 export function isStandaloneDisplayMode(): boolean {
@@ -38,7 +47,7 @@ export function isStandaloneDisplayMode(): boolean {
 export function resolveWebPushSupportState(): WebPushSupportState {
   if (!hasWindow()) return 'unsupported'
 
-  if (isAppleMobileDevice() && !isStandaloneDisplayMode()) {
+  if (isMobileDevice() && !isStandaloneDisplayMode()) {
     return 'install-required'
   }
 
