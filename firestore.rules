@@ -176,14 +176,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    match /user_devices/{deviceId} {
-      allow create, update: if signedIn() &&
-        request.resource.data.userId == request.auth.uid;
-      allow read: if false;
-      allow delete: if signedIn() &&
-        resource.data.userId == request.auth.uid;
-    }
-
     match /web_push_subscriptions/{subscriptionId} {
       allow create, update: if signedIn() && validWebPushSubscription();
       allow read: if false;

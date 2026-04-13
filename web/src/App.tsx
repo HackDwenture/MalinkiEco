@@ -29,6 +29,7 @@ import { INITIAL_POLL_DRAFT, TAB_LABELS } from './constants'
 import { AuthScreen } from './components/AuthScreen'
 import { EventsSection } from './components/EventsSection'
 import { LogsSection } from './components/LogsSection'
+import { MaintenanceScreen } from './components/MaintenanceScreen'
 import { OwnersSection } from './components/OwnersSection'
 import { PaymentsSection } from './components/PaymentsSection'
 import { PollsSection } from './components/PollsSection'
@@ -36,6 +37,7 @@ import { ResidentChat } from './components/ResidentChat'
 import { SetupScreen } from './components/SetupScreen'
 import { SiteFooter } from './components/SiteFooter'
 import { SplashScreen } from './components/SplashScreen'
+import { useAppGate } from './hooks/useAppGate'
 import { useFirebaseAuthState } from './hooks/useFirebaseAuthState'
 import { usePageNotice } from './hooks/usePageNotice'
 import { useResidentAuth } from './hooks/useResidentAuth'
@@ -73,6 +75,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabKey>(() => readRequestedTabFromUrl() ?? 'events')
   const [pollDraft, setPollDraft] = useState<PollDraft>(INITIAL_POLL_DRAFT)
   const [pollSubmitting, setPollSubmitting] = useState(false)
+  const appGate = useAppGate()
   const { authUser, authLoading } = useFirebaseAuthState()
   const { pageNotice, showNotice, clearNotice } = usePageNotice()
   const {
@@ -93,11 +96,13 @@ function App() {
     verifyEmailCode,
   } = useResidentAuth()
 
+  const maintenanceEnabled = appGate.maintenanceEnabled
+
   const { profile, profileLoading, setProfile } = useResidentProfile({
-    authUser,
+    authUser: maintenanceEnabled ? null : authUser,
     onMissingProfile: handleMissingProfileAccess,
   })
-  const { unbindBeforeLogout } = useWebPush(profile, showNotice)
+  const { unbindBeforeLogout } = useWebPush(maintenanceEnabled ? null : profile, showNotice)
 
   const {
     users,
@@ -109,7 +114,7 @@ function App() {
     paymentRequests,
     registrationRequests,
     auditLogs,
-  } = useResidentData(profile, activeTab)
+  } = useResidentData(maintenanceEnabled ? null : profile, activeTab)
 
   const isStaff = profile?.role === 'ADMIN' || profile?.role === 'MODERATOR'
   const pendingPaymentRequestsCount = paymentRequests.filter((request) => request.status === 'PENDING').length
@@ -871,8 +876,12 @@ function App() {
     return <SetupScreen />
   }
 
-  if (authLoading || profileLoading) {
+  if (appGate.loading || authLoading || profileLoading) {
     return <SplashScreen message="Подключаем веб-кабинет поселка..." />
+  }
+
+  if (maintenanceEnabled) {
+    return <MaintenanceScreen title={appGate.maintenanceTitle} message={appGate.maintenanceMessage} />
   }
 
   if (!authUser || !profile) {
