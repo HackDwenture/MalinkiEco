@@ -4,10 +4,10 @@ import {
   disableStoredWebPushSubscription,
   getCurrentPushSubscription,
   isAppleMobileDevice,
-  isStandaloneDisplayMode,
   removeStoredWebPushSubscription,
   resolveWebPushSupportState,
   saveWebPushSubscription,
+  shouldAutoEnableWebPush,
   subscribeToWebPush,
   type WebPushSupportState,
 } from '../lib/webPush'
@@ -180,7 +180,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
   }, [busy, disable, enable, status])
 
   useEffect(() => {
-    if (!profileId || busy || status !== 'ready' || !isStandaloneDisplayMode()) {
+    if (!profileId || busy || status !== 'ready' || !shouldAutoEnableWebPush()) {
       return
     }
 

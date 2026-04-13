@@ -27,6 +27,11 @@ export function isAndroidMobileDevice(): boolean {
   return /android/i.test(window.navigator.userAgent ?? '')
 }
 
+export function isYandexBrowser(): boolean {
+  if (!hasWindow()) return false
+  return /yabrowser/i.test(window.navigator.userAgent ?? '')
+}
+
 export function isAppleMobileDevice(): boolean {
   if (!hasWindow()) return false
   const platform = window.navigator.platform ?? ''
@@ -47,7 +52,11 @@ export function isStandaloneDisplayMode(): boolean {
 export function resolveWebPushSupportState(): WebPushSupportState {
   if (!hasWindow()) return 'unsupported'
 
-  if (isMobileDevice() && !isStandaloneDisplayMode()) {
+  if (isAppleMobileDevice() && !isStandaloneDisplayMode()) {
+    return 'install-required'
+  }
+
+  if (isAndroidMobileDevice() && !isStandaloneDisplayMode() && !isYandexBrowser()) {
     return 'install-required'
   }
 
@@ -60,6 +69,12 @@ export function resolveWebPushSupportState(): WebPushSupportState {
   }
 
   return Notification.permission === 'granted' ? 'enabled' : 'ready'
+}
+
+export function shouldAutoEnableWebPush(): boolean {
+  if (!hasWindow()) return false
+  if (isStandaloneDisplayMode()) return true
+  return isAndroidMobileDevice() && isYandexBrowser()
 }
 
 export async function ensureWebPushServiceWorker(): Promise<ServiceWorkerRegistration> {
