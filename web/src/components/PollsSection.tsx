@@ -37,7 +37,7 @@ export function PollsSection({
       <div className="panel-heading">
         <p className="eyebrow accent">Раздел</p>
         <h2>Опросы</h2>
-        <p>Здесь можно голосовать и создавать свои опросы для жителей, как в Android-приложении.</p>
+        <p>Здесь можно голосовать и создавать свои опросы для жителей прямо в веб-версии.</p>
       </div>
 
       <div className="poll-create-card">

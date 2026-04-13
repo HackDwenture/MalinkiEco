@@ -1,5 +1,5 @@
 *.iml
-.gradle
+/.gradle
 /.gradle-home
 /local.properties
 /.idea/caches
@@ -12,14 +12,7 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
-/app/build
-/app/release
-/app/google-services.json
-/functions/node_modules
 /.kotlin
 /captures
-.externalNativeBuild
-.cxx
-local.properties
 /backend/node_modules
 /backend/.env
