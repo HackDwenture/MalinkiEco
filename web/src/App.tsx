@@ -74,6 +74,20 @@ import './App.css'
 
 const EVENT_EMAIL_FOOTER =
   'Рекомендуем открыть MalinkiEco, чтобы ознакомиться с деталями события и актуальной информацией.'
+const TAB_BADGE_STORAGE_PREFIX = 'malinkieco.tabSeen.v1'
+
+type TabSeenState = Record<TabKey, number>
+
+function emptySeenState(): TabSeenState {
+  return {
+    events: 0,
+    chat: 0,
+    owners: 0,
+    polls: 0,
+    payments: 0,
+    logs: 0,
+  }
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabKey>(() => readRequestedTabFromUrl() ?? 'events')
@@ -171,6 +185,102 @@ function App() {
     () => events.filter((item) => item.type === 'POLL' && (item.targetUserId === '' || item.targetUserId === profile?.id)),
     [events, profile?.id],
   )
+  const unreadChatCount = useMemo(
+    () => chatMessages.filter((item) => item.senderId !== profile?.id && item.createdAtClient > Number(profile?.lastChatReadAt ?? 0)).length,
+    [chatMessages, profile?.id, profile?.lastChatReadAt],
+  )
+
+  const latestByTab = useMemo<TabSeenState>(() => {
+    const latestEvents = visibleEvents.reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0)
+    const latestPolls = visiblePolls.reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0)
+    const latestChat = chatMessages.reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0)
+    const latestPayments = visibleEvents
+      .filter((item) => item.type === 'CHARGE' || item.type === 'EXPENSE')
+      .reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0)
+    const latestOwners = isStaff
+      ? Math.max(
+          paymentRequests.reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0),
+          registrationRequests.reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0),
+        )
+      : 0
+    const latestLogs = isStaff ? auditLogs.reduce((maxValue, item) => Math.max(maxValue, Number(item.createdAtClient ?? 0)), 0) : 0
+
+    return {
+      events: latestEvents,
+      chat: latestChat,
+      owners: latestOwners,
+      polls: latestPolls,
+      payments: latestPayments,
+      logs: latestLogs,
+    }
+  }, [auditLogs, chatMessages, isStaff, paymentRequests, registrationRequests, visibleEvents, visiblePolls])
+
+  const [seenTabs, setSeenTabs] = useState<TabSeenState>(emptySeenState)
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setSeenTabs(emptySeenState())
+      return
+    }
+
+    const storageKey = `${TAB_BADGE_STORAGE_PREFIX}:${profile.id}`
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) {
+      setSeenTabs(latestByTab)
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<TabSeenState>
+      setSeenTabs({
+        ...emptySeenState(),
+        ...parsed,
+      })
+    } catch {
+      setSeenTabs(latestByTab)
+    }
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    const storageKey = `${TAB_BADGE_STORAGE_PREFIX}:${profile.id}`
+    window.localStorage.setItem(storageKey, JSON.stringify(seenTabs))
+  }, [profile?.id, seenTabs])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    const latestForActive = latestByTab[activeTab]
+    setSeenTabs((current) => {
+      if (latestForActive <= Number(current[activeTab] ?? 0)) return current
+      return {
+        ...current,
+        [activeTab]: latestForActive,
+      }
+    })
+  }, [activeTab, latestByTab, profile?.id])
+
+  const tabBadgeCounts = useMemo<Record<TabKey, number>>(() => {
+    const eventsCount = visibleEvents.filter((item) => Number(item.createdAtClient ?? 0) > Number(seenTabs.events ?? 0)).length
+    const pollsCount = visiblePolls.filter((item) => Number(item.createdAtClient ?? 0) > Number(seenTabs.polls ?? 0)).length
+    const paymentsCount = visibleEvents.filter(
+      (item) =>
+        (item.type === 'CHARGE' || item.type === 'EXPENSE') &&
+        Number(item.createdAtClient ?? 0) > Number(seenTabs.payments ?? 0),
+    ).length
+    const ownersCount = isStaff ? pendingOwnersItemsCount : 0
+    const logsCount = isStaff
+      ? auditLogs.filter((item) => Number(item.createdAtClient ?? 0) > Number(seenTabs.logs ?? 0)).length
+      : 0
+
+    return {
+      events: eventsCount,
+      chat: unreadChatCount,
+      owners: ownersCount,
+      polls: pollsCount,
+      payments: paymentsCount,
+      logs: logsCount,
+    }
+  }, [auditLogs, isStaff, pendingOwnersItemsCount, seenTabs, unreadChatCount, visibleEvents, visiblePolls])
 
   const normalizeEmail = (value: string | undefined) => value?.trim().toLowerCase() ?? ''
 
@@ -994,9 +1104,9 @@ function App() {
             onClick={() => setActiveTab(tab)}
           >
             <span>{TAB_LABELS[tab]}</span>
-            {tab === 'owners' && isStaff && pendingOwnersItemsCount > 0 && (
-              <span className="tab-badge" aria-label={`Новых заявок: ${pendingOwnersItemsCount}`}>
-                {pendingOwnersItemsCount}
+            {tabBadgeCounts[tab] > 0 && (
+              <span className="tab-badge" aria-label={`Новых элементов: ${tabBadgeCounts[tab]}`}>
+                {tabBadgeCounts[tab]}
               </span>
             )}
           </button>
