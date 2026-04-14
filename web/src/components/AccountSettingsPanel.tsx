@@ -12,6 +12,15 @@ type AccountSettingsPanelProps = {
   onUpdateNotificationSettings: (settings: NotificationSettings) => void | Promise<void>
 }
 
+const TOGGLES: Array<{ key: keyof NotificationSettings; label: string }> = [
+  { key: 'events', label: 'События и объявления' },
+  { key: 'chat', label: 'Чат' },
+  { key: 'mentions', label: 'Упоминания' },
+  { key: 'polls', label: 'Опросы' },
+  { key: 'payments', label: 'Оплаты и сборы' },
+  { key: 'system', label: 'Системные уведомления' },
+]
+
 export function AccountSettingsPanel({
   profile,
   open,
@@ -75,60 +84,21 @@ export function AccountSettingsPanel({
         <section className="settings-panel__section">
           <h4>Уведомления</h4>
           <div className="settings-toggles">
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.events}
-                disabled={savingNotificationSettings}
-                onChange={(event) => updateToggle('events', event.target.checked)}
-              />
-              <span>События и объявления</span>
-            </label>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.chat}
-                disabled={savingNotificationSettings}
-                onChange={(event) => updateToggle('chat', event.target.checked)}
-              />
-              <span>Чат</span>
-            </label>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.mentions}
-                disabled={savingNotificationSettings}
-                onChange={(event) => updateToggle('mentions', event.target.checked)}
-              />
-              <span>Упоминания</span>
-            </label>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.polls}
-                disabled={savingNotificationSettings}
-                onChange={(event) => updateToggle('polls', event.target.checked)}
-              />
-              <span>Опросы</span>
-            </label>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.payments}
-                disabled={savingNotificationSettings}
-                onChange={(event) => updateToggle('payments', event.target.checked)}
-              />
-              <span>Оплаты и сборы</span>
-            </label>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={settings.system}
-                disabled={savingNotificationSettings}
-                onChange={(event) => updateToggle('system', event.target.checked)}
-              />
-              <span>Системные уведомления</span>
-            </label>
+            {TOGGLES.map((toggle) => (
+              <label key={toggle.key} className="poll-anonymous-toggle" htmlFor={`settings-toggle-${toggle.key}`}>
+                <input
+                  id={`settings-toggle-${toggle.key}`}
+                  type="checkbox"
+                  checked={settings[toggle.key]}
+                  disabled={savingNotificationSettings}
+                  onChange={(event) => updateToggle(toggle.key, event.target.checked)}
+                />
+                <span className="poll-anonymous-toggle__track" aria-hidden="true">
+                  <span className="poll-anonymous-toggle__thumb" />
+                </span>
+                <span className="poll-anonymous-toggle__label">{toggle.label}</span>
+              </label>
+            ))}
           </div>
         </section>
 
