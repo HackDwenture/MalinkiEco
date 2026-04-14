@@ -85,63 +85,66 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
     }
   }, [profileId, syncCurrentSubscription])
 
-  const enable = useCallback(async (options: { silent?: boolean } = {}) => {
-    const silent = options.silent === true
-    if (!db || !profileId) return
+  const enable = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const silent = options.silent === true
+      if (!db || !profileId) return
 
-    const supportState = resolveWebPushSupportState()
-    if (supportState === 'install-required') {
-      if (!silent) {
-        showNotice(
-          isAppleMobileDevice()
-            ? 'На iPhone сначала откройте меню “Поделиться”, выберите “На экран Домой”, затем откройте сайт как приложение и включите push.'
-            : 'Сначала откройте сайт как установленное приложение, затем включите push.',
-        )
-      }
-      setStatus('install-required')
-      return
-    }
-
-    if (supportState === 'unsupported') {
-      if (!silent) {
-        showNotice('В этом браузере web push пока не поддерживается.')
-      }
-      setStatus('unsupported')
-      return
-    }
-
-    setBusy(true)
-    try {
-      const permission =
-        Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
-
-      if (permission !== 'granted') {
-        setStatus(permission === 'denied' ? 'blocked' : 'ready')
+      const supportState = resolveWebPushSupportState()
+      if (supportState === 'install-required') {
         if (!silent) {
           showNotice(
-            permission === 'denied'
-              ? 'Push отключены в настройках браузера. Разрешите уведомления для MalinkiEco и попробуйте снова.'
-              : 'Разрешение на push не выдано.',
+            isAppleMobileDevice()
+              ? 'На iPhone сначала откройте меню «Поделиться», выберите «На экран Домой», затем откройте сайт как приложение и включите push.'
+              : 'Сначала откройте сайт как установленное приложение, затем включите push.',
           )
         }
+        setStatus('install-required')
         return
       }
 
-      const subscription = await subscribeToWebPush()
-      await saveWebPushSubscription(db, { id: profileId }, subscription)
-      setStatus('enabled')
-      if (!silent) {
-        showNotice('Push для веб-версии включены. На iPhone уведомления будут приходить из установленного приложения.')
+      if (supportState === 'unsupported') {
+        if (!silent) {
+          showNotice('В этом браузере web push пока не поддерживается.')
+        }
+        setStatus('unsupported')
+        return
       }
-    } catch (error) {
-      setStatus(resolveWebPushSupportState())
-      if (!silent) {
-        showNotice(humanizeError(error))
+
+      setBusy(true)
+      try {
+        const permission =
+          Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
+
+        if (permission !== 'granted') {
+          setStatus(permission === 'denied' ? 'blocked' : 'ready')
+          if (!silent) {
+            showNotice(
+              permission === 'denied'
+                ? 'Push отключены в настройках браузера. Разрешите уведомления для MalinkiEco и попробуйте снова.'
+                : 'Разрешение на push не выдано.',
+            )
+          }
+          return
+        }
+
+        const subscription = await subscribeToWebPush()
+        await saveWebPushSubscription(db, { id: profileId }, subscription)
+        setStatus('enabled')
+        if (!silent) {
+          showNotice('Push для веб-версии включены. На iPhone уведомления будут приходить из установленного приложения.')
+        }
+      } catch (error) {
+        setStatus(resolveWebPushSupportState())
+        if (!silent) {
+          showNotice(humanizeError(error))
+        }
+      } finally {
+        setBusy(false)
       }
-    } finally {
-      setBusy(false)
-    }
-  }, [profileId, showNotice])
+    },
+    [profileId, showNotice],
+  )
 
   const disable = useCallback(async () => {
     if (!db) return
@@ -209,7 +212,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
       case 'enabled':
         return {
           title: 'Push включены',
-          description: 'Чат, события и платежи будут приходить в установленную веб-версию как обычные push.',
+          description: 'Чат, события и платежи будут приходить в веб-версию как обычные push.',
           actionLabel: busy ? 'Сохраняем...' : 'Отключить',
         }
       case 'install-required':
@@ -221,13 +224,13 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
       case 'blocked':
         return {
           title: 'Push заблокированы',
-          description: 'Разрешите уведомления в настройках Safari/браузера, и мы снова сможем их включить.',
+          description: 'Разрешите уведомления в настройках браузера, и мы снова сможем их включить.',
           actionLabel: 'Подсказка',
         }
       case 'ready':
         return {
           title: 'Push готовы',
-          description: 'Можно включить push для установленной веб-версии. Без установки на экран останется email.',
+          description: 'Можно включить push для веб-версии. Если браузер не поддерживает их надежно, останется email.',
           actionLabel: busy ? 'Подключаем...' : 'Включить push',
         }
       default:
