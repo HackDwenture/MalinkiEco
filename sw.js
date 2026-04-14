@@ -40,17 +40,24 @@ self.addEventListener('push', (event) => {
   const destination = String(payload.destination || fallbackPayload.destination)
   const category = String(payload.category || destination)
   const url = resolveNotificationUrl(payload)
+  const timestamp = Number(payload.timestamp || Date.now())
+  const notificationTag = String(payload.tag || `malinkieco-${category}-${timestamp}`)
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      tag: `malinkieco-${category}`,
-      badge: '/pwa-192.png',
+      tag: notificationTag,
+      badge: '/notification-badge.png',
       icon: '/pwa-192.png',
+      vibrate: [180, 80, 180],
+      timestamp,
+      renotify: true,
+      silent: false,
       data: {
         url,
         destination,
         category,
+        timestamp,
       },
     }),
   )
