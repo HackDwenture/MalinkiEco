@@ -95,8 +95,8 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
         if (!silent) {
           showNotice(
             isAppleMobileDevice()
-              ? 'На iPhone сначала откройте меню «Поделиться», выберите «На экран Домой», затем откройте сайт как приложение и включите push.'
-              : 'Сначала откройте сайт как установленное приложение, затем включите push.',
+              ? 'На iPhone сначала откройте меню «Поделиться», выберите «На экран Домой», затем откройте сайт как приложение и включите push-уведомления.'
+              : 'Сначала откройте сайт как установленное приложение, затем включите push-уведомления.',
           )
         }
         setStatus('install-required')
@@ -121,8 +121,8 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
           if (!silent) {
             showNotice(
               permission === 'denied'
-                ? 'Push отключены в настройках браузера. Разрешите уведомления для MalinkiEco и попробуйте снова.'
-                : 'Разрешение на push не выдано.',
+                ? 'Push-уведомления отключены в настройках браузера. Разрешите уведомления для MalinkiEco и повторите попытку.'
+                : 'Разрешение на push-уведомления не было предоставлено.',
             )
           }
           return
@@ -132,7 +132,9 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
         await saveWebPushSubscription(db, { id: profileId }, subscription)
         setStatus('enabled')
         if (!silent) {
-          showNotice('Push для веб-версии включены. На iPhone уведомления будут приходить из установленного приложения.')
+          showNotice(
+            'Push-уведомления для веб-версии включены. На iPhone уведомления будут поступать из установленной веб-версии приложения.',
+          )
         }
       } catch (error) {
         setStatus(resolveWebPushSupportState())
@@ -152,7 +154,7 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
     try {
       await disableStoredWebPushSubscription(db)
       setStatus('ready')
-      showNotice('Push для веб-версии отключены.')
+      showNotice('Push-уведомления для веб-версии отключены.')
     } catch (error) {
       showNotice(humanizeError(error))
     } finally {
@@ -211,32 +213,35 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
     switch (status) {
       case 'enabled':
         return {
-          title: 'Push включены',
-          description: 'Чат, события и платежи будут приходить в веб-версию как обычные push.',
+          title: 'Push-уведомления включены',
+          description: 'Уведомления о сообщениях, событиях и платежах будут доставляться в веб-версию через push.',
           actionLabel: busy ? 'Сохраняем...' : 'Отключить',
         }
       case 'install-required':
         return {
-          title: 'Добавьте на экран Домой',
-          description: 'На iPhone web push работают только после установки MalinkiEco на домашний экран через Safari.',
-          actionLabel: 'Как включить',
+          title: 'Требуется установка на экран Домой',
+          description:
+            'На iPhone push-уведомления работают только в установленной веб-версии MalinkiEco, добавленной на экран Домой через Safari.',
+          actionLabel: 'Инструкция',
         }
       case 'blocked':
         return {
-          title: 'Push заблокированы',
-          description: 'Разрешите уведомления в настройках браузера, и мы снова сможем их включить.',
+          title: 'Push-уведомления заблокированы',
+          description:
+            'Разрешите уведомления в настройках браузера, после чего подключение push-уведомлений можно будет повторить.',
           actionLabel: 'Повторить',
         }
       case 'ready':
         return {
-          title: 'Push готовы',
-          description: 'Можно включить push для веб-версии. Если браузер не поддерживает их надежно, останется email.',
+          title: 'Push-уведомления доступны',
+          description:
+            'При необходимости вы можете включить push-уведомления для веб-версии. Если браузер не поддерживает их стабильную доставку, уведомления будут приходить по электронной почте.',
           actionLabel: busy ? 'Подключаем...' : 'Включить push',
         }
       default:
         return {
-          title: 'Push недоступны',
-          description: 'Для этого устройства останется текущая схема с email-уведомлениями.',
+          title: 'Push-уведомления недоступны',
+          description: 'Для этого устройства продолжит использоваться текущая схема уведомлений по электронной почте.',
           actionLabel: null,
         }
     }

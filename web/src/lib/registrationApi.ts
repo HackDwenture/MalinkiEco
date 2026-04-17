@@ -9,9 +9,9 @@ import {
   type UserCredential,
 } from 'firebase/auth'
 import { getDatabase } from 'firebase/database'
-import { doc, getDoc, getFirestore, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
+import { collection, doc, getDoc, getDocs, getFirestore, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore'
 import type { AuthFormState } from '../types'
-import { enqueueEmailNotification } from './appApi'
+import { enqueueEmailNotification, enqueueTargetedNotification } from './appApi'
 import { RTDB_URL, firebaseConfig, firebaseSetup } from './firebase'
 import { isValidRussianPhoneInput, normalizeAuthEmail, normalizeRussianPhone, parsePlots } from '../utils'
 
@@ -131,6 +131,19 @@ async function readRegistrationState(userId: string) {
     requestStatus: String(requestData?.status ?? ''),
     requestData,
   }
+}
+
+async function collectStaffUserIds() {
+  const { db } = ensureFirebaseReady()
+  const usersSnapshot = await getDocs(collection(db, 'users'))
+
+  return usersSnapshot.docs
+    .filter((snapshot) => {
+      const role = String(snapshot.data()?.role ?? '')
+      return role === 'ADMIN' || role === 'MODERATOR'
+    })
+    .map((snapshot) => snapshot.id)
+    .filter(Boolean)
 }
 
 async function ensureRegistrationUser(email: string, password: string): Promise<UserCredential> {
@@ -384,6 +397,33 @@ export async function submitVerifiedRegistration(form: AuthFormState, registerTo
         { merge: true },
       ),
     )
+
+    try {
+      const staffUserIds = await withFirestoreSessionRetry(registrationAuthInstance, credential, () =>
+        collectStaffUserIds(),
+      )
+
+      if (staffUserIds.length > 0) {
+        await withFirestoreSessionRetry(registrationAuthInstance, credential, () =>
+          enqueueTargetedNotification(
+            db,
+            {
+              title: 'Новая заявка на регистрацию',
+              body: `${fullName}: ${plots.join(', ')}`,
+              destination: 'owners',
+              category: 'registration',
+              targetUserIds: staffUserIds,
+            },
+            {
+              signalDb: registrationRtdb,
+              creatorId: credential.user.uid,
+            },
+          ),
+        )
+      }
+    } catch {
+      // The registration itself is more important than the staff push.
+    }
   } finally {
     await signOut(registrationAuthInstance)
   }

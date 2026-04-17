@@ -421,6 +421,19 @@ function App() {
     setSavingProfileChangeRequest(true)
     try {
       await submitProfileChangeRequestAction(db, profile, payload)
+      try {
+        await enqueueTargetedNotification(db, {
+          title: 'Новый запрос на изменение данных',
+          body: `${profile.fullName}: ${payload.fullName.trim()}`,
+          destination: 'owners',
+          category: 'registration',
+          targetUserIds: staffUserIds,
+        })
+      } catch {
+        showNotice('Запрос на изменение данных отправлен, но уведомление модераторам пока не поставлено в очередь.')
+        setSettingsOpen(false)
+        return
+      }
       showNotice('Запрос на изменение данных отправлен. После одобрения данные обновятся.')
       setSettingsOpen(false)
     } catch (error) {
