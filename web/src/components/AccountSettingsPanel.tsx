@@ -150,10 +150,6 @@ export function AccountSettingsPanel({
           <div className="settings-toggles">
             {toggles.map((toggle) => (
               <label key={toggle.key} className="settings-toggle-card" htmlFor={`settings-toggle-${toggle.key}`}>
-                <div className="settings-toggle-card__copy">
-                  <span className="settings-toggle-card__label">{toggle.label}</span>
-                  <span className="settings-toggle-card__description">{toggle.description}</span>
-                </div>
                 <span className="settings-toggle-card__control">
                   <input
                     id={`settings-toggle-${toggle.key}`}
@@ -166,6 +162,10 @@ export function AccountSettingsPanel({
                     <span className="poll-anonymous-toggle__thumb" />
                   </span>
                 </span>
+                <div className="settings-toggle-card__copy">
+                  <span className="settings-toggle-card__label">{toggle.label}</span>
+                  <span className="settings-toggle-card__description">{toggle.description}</span>
+                </div>
               </label>
             ))}
           </div>

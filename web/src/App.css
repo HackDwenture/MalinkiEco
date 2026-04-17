@@ -449,8 +449,8 @@
 .settings-toggle-card {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 14px;
   padding: 12px 14px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
@@ -461,6 +461,8 @@
 .settings-toggle-card__copy {
   display: grid;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .settings-toggle-card__label {
@@ -477,11 +479,12 @@
 .settings-toggle-card__control {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex-shrink: 0;
   position: relative;
   min-width: 44px;
   min-height: 24px;
+  margin-top: 2px;
 }
 
 .settings-toggle-card__control input {
