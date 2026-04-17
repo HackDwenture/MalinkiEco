@@ -6,8 +6,13 @@ type AccountSettingsPanelProps = {
   open: boolean
   savingProfileRequest: boolean
   savingNotificationSettings: boolean
+  webPushTitle: string
+  webPushDescription: string
+  webPushActionLabel: string | null
+  webPushBusy: boolean
   onClose: () => void
   onLogout: () => void | Promise<void>
+  onWebPushAction: () => void | Promise<void>
   onSubmitProfileChangeRequest: (payload: { fullName: string; phone: string }) => void | Promise<void>
   onUpdateNotificationSettings: (settings: NotificationSettings) => void | Promise<void>
 }
@@ -26,8 +31,13 @@ export function AccountSettingsPanel({
   open,
   savingProfileRequest,
   savingNotificationSettings,
+  webPushTitle,
+  webPushDescription,
+  webPushActionLabel,
+  webPushBusy,
   onClose,
   onLogout,
+  onWebPushAction,
   onSubmitProfileChangeRequest,
   onUpdateNotificationSettings,
 }: AccountSettingsPanelProps) {
@@ -79,6 +89,21 @@ export function AccountSettingsPanel({
           >
             {savingProfileRequest ? 'Отправляем...' : 'Отправить запрос на изменение'}
           </button>
+        </section>
+
+        <section className="settings-panel__section">
+          <h4>Push для веб-версии</h4>
+          <div className="settings-push-card">
+            <div className="settings-push-card__copy">
+              <strong>{webPushTitle}</strong>
+              <p>{webPushDescription}</p>
+            </div>
+            {webPushActionLabel ? (
+              <button className="ghost-button" type="button" disabled={webPushBusy} onClick={() => void onWebPushAction()}>
+                {webPushActionLabel}
+              </button>
+            ) : null}
+          </div>
         </section>
 
         <section className="settings-panel__section">

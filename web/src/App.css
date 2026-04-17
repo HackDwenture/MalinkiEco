@@ -408,6 +408,24 @@
   color: rgba(224, 234, 245, 0.78);
 }
 
+.settings-push-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.settings-push-card__copy {
+  display: grid;
+  gap: 6px;
+  min-width: min(320px, 100%);
+}
+
+.settings-push-card__copy strong {
+  color: #f5f9ff;
+}
+
 .settings-panel__section label {
   display: grid;
   gap: 6px;

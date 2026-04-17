@@ -218,14 +218,14 @@ export function useWebPush(profile: RemoteUser | null, showNotice: NoticeCallbac
       case 'install-required':
         return {
           title: 'Добавьте на экран Домой',
-          description: 'На iPhone web push работают после установки MalinkiEco на домашний экран.',
+          description: 'На iPhone web push работают только после установки MalinkiEco на домашний экран через Safari.',
           actionLabel: 'Как включить',
         }
       case 'blocked':
         return {
           title: 'Push заблокированы',
           description: 'Разрешите уведомления в настройках браузера, и мы снова сможем их включить.',
-          actionLabel: 'Подсказка',
+          actionLabel: 'Повторить',
         }
       case 'ready':
         return {

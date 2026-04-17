@@ -125,7 +125,12 @@ function App() {
   })
   const isMaintenancePrivileged = profile?.role === 'ADMIN' || profile?.role === 'TESTER'
   const maintenanceLocked = maintenanceEnabled && !isMaintenancePrivileged
-  const { unbindBeforeLogout } = useWebPush(maintenanceLocked ? null : profile, showNotice)
+  const {
+    unbindBeforeLogout,
+    busy: webPushBusy,
+    presentation: webPushPresentation,
+    handleAction: handleWebPushAction,
+  } = useWebPush(maintenanceLocked ? null : profile, showNotice)
 
   const {
     users,
@@ -1127,8 +1132,13 @@ function App() {
         open={settingsOpen}
         savingProfileRequest={savingProfileChangeRequest}
         savingNotificationSettings={savingNotificationSettings}
+        webPushTitle={webPushPresentation.title}
+        webPushDescription={webPushPresentation.description}
+        webPushActionLabel={webPushPresentation.actionLabel}
+        webPushBusy={webPushBusy}
         onClose={() => setSettingsOpen(false)}
         onLogout={handleLogout}
+        onWebPushAction={handleWebPushAction}
         onSubmitProfileChangeRequest={handleSubmitProfileChangeRequest}
         onUpdateNotificationSettings={handleUpdateNotificationSettings}
       />
