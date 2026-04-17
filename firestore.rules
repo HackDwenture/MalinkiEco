@@ -74,9 +74,14 @@ service cloud.firestore {
           (
             request.resource.data.audience in ['emails', 'direct_email'] &&
             request.resource.data.destination == 'auth' &&
-            request.resource.data.category == 'verification' &&
+            request.resource.data.category in ['verification', 'registration'] &&
             request.resource.data.sendEmail == true &&
-            request.resource.data.sendPush == false
+            request.resource.data.sendPush == false &&
+            (
+              request.resource.data.category == 'verification' ||
+              isAdmin() ||
+              isModerator()
+            )
           ) ||
           (
             request.resource.data.audience in ['emails', 'direct_email'] &&
