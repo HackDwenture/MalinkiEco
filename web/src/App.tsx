@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { signOut } from 'firebase/auth'
-import { auth, db, firebaseSetup } from './lib/firebase'
+import { auth, db, firebaseSetup, rtdb } from './lib/firebase'
 import {
   approveRegistrationRequest as approveRegistrationRequestAction,
   closePoll as closePollRequest,
@@ -354,7 +354,7 @@ function App() {
     category: string
     excludedUserIds?: string[]
   }) => {
-    if (!db) return
+    if (!db || !profile?.id) return
 
     const emailTargets = collectBroadcastEmailTargets(excludedUserIds)
     if (emailTargets.length === 0) return
@@ -367,6 +367,9 @@ function App() {
       emailTargets,
       sendEmail: true,
       sendPush: false,
+    }, {
+      signalDb: rtdb,
+      creatorId: profile.id,
     })
   }
 
@@ -391,7 +394,7 @@ function App() {
     targetUserIds: string[]
     emailTargets?: string[]
   }) => {
-    if (!db) return
+    if (!db || !profile?.id) return
 
     const emailTargets = dedupeEmailTargets([
       ...collectTargetedEmailTargets(targetUserIds),
@@ -407,6 +410,9 @@ function App() {
       emailTargets,
       sendEmail: true,
       sendPush: false,
+    }, {
+      signalDb: rtdb,
+      creatorId: profile.id,
     })
   }
 
