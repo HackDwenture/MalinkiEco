@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { NotificationSettings, RemoteUser } from '../types'
 
 type AccountSettingsPanelProps = {
@@ -17,13 +17,17 @@ type AccountSettingsPanelProps = {
   onUpdateNotificationSettings: (settings: NotificationSettings) => void | Promise<void>
 }
 
-const TOGGLES: Array<{ key: keyof NotificationSettings; label: string }> = [
+const BASE_TOGGLES: Array<{ key: keyof NotificationSettings; label: string }> = [
   { key: 'events', label: 'События и объявления' },
   { key: 'chat', label: 'Чат' },
   { key: 'mentions', label: 'Упоминания' },
   { key: 'polls', label: 'Опросы' },
   { key: 'payments', label: 'Оплаты и сборы' },
   { key: 'system', label: 'Системные уведомления' },
+]
+
+const STAFF_TOGGLES: Array<{ key: keyof NotificationSettings; label: string }> = [
+  { key: 'requests', label: 'Заявки от пользователей' },
 ]
 
 export function AccountSettingsPanel({
@@ -44,6 +48,12 @@ export function AccountSettingsPanel({
   const [fullName, setFullName] = useState(profile.fullName)
   const [phone, setPhone] = useState(profile.phone ?? '')
   const [settings, setSettings] = useState<NotificationSettings>(profile.notificationSettings)
+
+  const isStaff = profile.role === 'ADMIN' || profile.role === 'MODERATOR'
+  const toggles = useMemo(
+    () => (isStaff ? [...BASE_TOGGLES, ...STAFF_TOGGLES] : BASE_TOGGLES),
+    [isStaff],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -109,7 +119,7 @@ export function AccountSettingsPanel({
         <section className="settings-panel__section">
           <h4>Уведомления</h4>
           <div className="settings-toggles">
-            {TOGGLES.map((toggle) => (
+            {toggles.map((toggle) => (
               <label key={toggle.key} className="poll-anonymous-toggle" htmlFor={`settings-toggle-${toggle.key}`}>
                 <input
                   id={`settings-toggle-${toggle.key}`}

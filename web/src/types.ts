@@ -12,6 +12,7 @@ export type NotificationSettings = {
   mentions: boolean
   polls: boolean
   payments: boolean
+  requests: boolean
   system: boolean
 }
 

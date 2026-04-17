@@ -411,7 +411,7 @@ export async function submitVerifiedRegistration(form: AuthFormState, registerTo
               title: 'Новая заявка на регистрацию',
               body: `${fullName}: ${plots.join(', ')}`,
               destination: 'owners',
-              category: 'registration',
+              category: 'requests',
               targetUserIds: staffUserIds,
             },
             {

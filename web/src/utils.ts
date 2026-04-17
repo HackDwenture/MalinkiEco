@@ -16,6 +16,7 @@ export function normalizeNotificationSettings(data: unknown): NotificationSettin
     mentions: raw.mentions === undefined ? DEFAULT_NOTIFICATION_SETTINGS.mentions : Boolean(raw.mentions),
     polls: raw.polls === undefined ? DEFAULT_NOTIFICATION_SETTINGS.polls : Boolean(raw.polls),
     payments: raw.payments === undefined ? DEFAULT_NOTIFICATION_SETTINGS.payments : Boolean(raw.payments),
+    requests: raw.requests === undefined ? DEFAULT_NOTIFICATION_SETTINGS.requests : Boolean(raw.requests),
     system: raw.system === undefined ? DEFAULT_NOTIFICATION_SETTINGS.system : Boolean(raw.system),
   }
 }

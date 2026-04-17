@@ -426,7 +426,7 @@ function App() {
           title: 'Новый запрос на изменение данных',
           body: `${profile.fullName}: ${payload.fullName.trim()}`,
           destination: 'owners',
-          category: 'registration',
+          category: 'requests',
           targetUserIds: staffUserIds,
         })
       } catch {
@@ -557,7 +557,7 @@ function App() {
           title: 'Новая заявка на оплату',
           body: `${profile.fullName}: ${amount} ₽`,
           destination: 'owners',
-          category: 'payments',
+          category: 'requests',
           targetUserIds: staffUserIds,
         })
       } catch {

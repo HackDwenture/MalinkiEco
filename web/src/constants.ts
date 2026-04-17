@@ -6,6 +6,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   mentions: true,
   polls: true,
   payments: true,
+  requests: true,
   system: true,
 }
 
