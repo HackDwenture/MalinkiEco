@@ -535,6 +535,26 @@ export async function rejectRegistrationRequest(
     request.fullName,
     request.plots.join(', '),
   )
+
+  if (request.requestType === 'REGISTRATION') {
+    await enqueueTargetedNotification(
+      db,
+      {
+        title: 'Auth cleanup',
+        body: `Delete auth account for rejected registration ${request.fullName}`,
+        destination: 'auth',
+        category: 'system',
+        targetUserIds: [request.id],
+        sendEmail: false,
+        sendPush: false,
+        authDeleteUserId: request.id,
+        cleanupWebPushUserId: request.id,
+      },
+      {
+        creatorId: reviewer.id,
+      },
+    )
+  }
 }
 
 export async function setUserBalance(
