@@ -1330,6 +1330,31 @@ button.payment-form-grid__wide {
   gap: 12px;
 }
 
+.owners-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.owners-filter__button {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e7eefb;
+  padding: 10px 16px;
+  cursor: pointer;
+  font: inherit;
+  transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.owners-filter__button.is-active {
+  background: linear-gradient(135deg, rgba(255, 110, 148, 0.22), rgba(255, 143, 115, 0.18));
+  border-color: rgba(255, 162, 184, 0.28);
+  box-shadow: 0 14px 30px rgba(255, 110, 148, 0.16);
+  color: #fff;
+}
+
 .owner-card {
   padding: 18px;
   display: grid;
